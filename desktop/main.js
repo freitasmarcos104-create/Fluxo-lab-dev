@@ -19,7 +19,7 @@ function readConfig() {
       appName: 'Fluxo Lab',
       startUrl: FALLBACK_URL,
       allowedHosts: ['fluxo-lab.trainingmav.workers.dev'],
-      accessHosts: ['cloudflareaccess.com', 'dash.cloudflare.com']
+      accessHosts: []
     };
   }
 }
