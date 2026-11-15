@@ -23,8 +23,8 @@ import android.widget.Toast;
 
 public class MainActivity extends Activity {
     private static final int COLOR_PETROLEO = android.graphics.Color.rgb(9, 38, 41);
-    private static final String START_URL = "https://fluxo-lab.trainingmav.workers.dev/";
-    private static final String APP_HOST = "fluxo-lab.trainingmav.workers.dev";
+    private static final String START_URL = "https://app.markfree.com.br/";
+    private static final String APP_HOST = "app.markfree.com.br";
     private static final int FILE_CHOOSER_REQUEST = 4102;
 
     private WebView webView;
