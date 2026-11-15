@@ -22266,70 +22266,30 @@ async function calcularResumoEmblemasV325(env, usuario) {
     if (conquista) conquistas.push(conquista);
   }
 
-  // Tarefas só contam quando foram criadas por ADMINISTRADOR e concluídas
-  // pelo próprio responsável. O último evento de status precisa ser CONCLUIDA,
-  // evitando premiar tarefas canceladas, reabertas ou encerradas pela liderança.
-  const tarefasResumo = await env.db.prepare(`
-    WITH tarefas_validas AS (
-      SELECT
-        t.id,
-        t.data_prazo,
-        h.criado_em AS concluida_em_responsavel
-      FROM agenda_tarefas_v323 t
-      INNER JOIN usuarios criador ON criador.id=t.criado_por
-      INNER JOIN agenda_tarefas_historico_v323 h
-        ON h.id = (
-          SELECT hx.id
-          FROM agenda_tarefas_historico_v323 hx
-          WHERE hx.tarefa_id=t.id AND hx.evento='STATUS'
-          ORDER BY hx.criado_em DESC, hx.id DESC
-          LIMIT 1
-        )
-      WHERE t.responsavel_id=?
-        AND criador.perfil='ADMINISTRADOR'
-        AND t.status='CONCLUIDA'
-        AND h.status_novo='CONCLUIDA'
-        AND h.usuario_id=t.responsavel_id
-    )
-    SELECT
-      COUNT(*) AS tarefas_concluidas,
-      COUNT(CASE
-        WHEN data_prazo IS NOT NULL
-          AND date(concluida_em_responsavel, '-3 hours') <= date(data_prazo)
-        THEN 1
-      END) AS tarefas_pontuais,
-      (
-        SELECT concluida_em_responsavel
-        FROM tarefas_validas
-        ORDER BY concluida_em_responsavel ASC, id ASC
-        LIMIT 1
-      ) AS primeira_tarefa_em,
-      (
-        SELECT concluida_em_responsavel
-        FROM tarefas_validas
-        WHERE data_prazo IS NOT NULL
-          AND date(concluida_em_responsavel, '-3 hours') <= date(data_prazo)
-        ORDER BY concluida_em_responsavel ASC, id ASC
-        LIMIT 1 OFFSET 19
-      ) AS vigesima_tarefa_pontual_em
-    FROM tarefas_validas
-  `).bind(usuarioId).first();
-
+  // Só contam tarefas criadas por ADMINISTRADOR e concluídas pelo próprio responsável.
+  // O último evento de status precisa continuar como CONCLUIDA.
+  const tarefasResumo = await env.db.prepare(
+    "WITH tarefas_validas AS (\n" +
+    "  SELECT t.id,t.data_prazo,h.criado_em AS concluida_em_responsavel\n" +
+    "  FROM agenda_tarefas_v323 t\n" +
+    "  INNER JOIN usuarios criador ON criador.id=t.criado_por\n" +
+    "  INNER JOIN agenda_tarefas_historico_v323 h ON h.id=(SELECT hx.id FROM agenda_tarefas_historico_v323 hx WHERE hx.tarefa_id=t.id AND hx.evento='STATUS' ORDER BY hx.criado_em DESC,hx.id DESC LIMIT 1)\n" +
+    "  WHERE t.responsavel_id=? AND criador.perfil='ADMINISTRADOR' AND t.status='CONCLUIDA'\n" +
+    "    AND h.status_novo='CONCLUIDA' AND h.usuario_id=t.responsavel_id\n" +
+    ")\n" +
+    "SELECT COUNT(*) AS tarefas_concluidas,\n" +
+    "  COUNT(CASE WHEN data_prazo IS NOT NULL AND date(concluida_em_responsavel,'-3 hours')<=date(data_prazo) THEN 1 END) AS tarefas_pontuais,\n" +
+    "  (SELECT concluida_em_responsavel FROM tarefas_validas ORDER BY concluida_em_responsavel,id LIMIT 1) AS primeira_tarefa_em,\n" +
+    "  (SELECT concluida_em_responsavel FROM tarefas_validas WHERE data_prazo IS NOT NULL AND date(concluida_em_responsavel,'-3 hours')<=date(data_prazo) ORDER BY concluida_em_responsavel,id LIMIT 1 OFFSET 19) AS vigesima_tarefa_pontual_em\n" +
+    "FROM tarefas_validas"
+  ).bind(usuarioId).first();
   const totalTarefasConcluidas = Number(tarefasResumo?.tarefas_concluidas || 0);
   const totalTarefasPontuais = Number(tarefasResumo?.tarefas_pontuais || 0);
   for (const emblema of EMBLEMAS_TAREFAS_V326) {
     const atual = emblema.metrica === "PONTUAIS" ? totalTarefasPontuais : totalTarefasConcluidas;
     if (atual >= emblema.meta) {
-      const dataConquista = emblema.metrica === "PONTUAIS"
-        ? tarefasResumo?.vigesima_tarefa_pontual_em
-        : tarefasResumo?.primeira_tarefa_em;
-      conquistas.push({
-        ...emblema,
-        conquistadoEm:dataConquista || hoje,
-        periodoInicio:null,
-        periodoFim:null,
-        referencia:emblema.meta
-      });
+      const dataConquista = emblema.metrica === "PONTUAIS" ? tarefasResumo?.vigesima_tarefa_pontual_em : tarefasResumo?.primeira_tarefa_em;
+      conquistas.push({ ...emblema, conquistadoEm:dataConquista || hoje, periodoInicio:null, periodoFim:null, referencia:emblema.meta });
     }
   }
 
@@ -22353,15 +22313,7 @@ async function calcularResumoEmblemasV325(env, usuario) {
     }
   }
   const conquistados = (await env.db.prepare(`SELECT * FROM emblemas_conquistas_v325 WHERE usuario_id=? ORDER BY conquistado_em ASC,id ASC`).bind(usuarioId).all()).results || [];
-  return {
-    totalProducao,
-    melhorSequencia,
-    sequenciaAtual,
-    semanaAtual,
-    tarefasConcluidas:totalTarefasConcluidas,
-    tarefasPontuais:totalTarefasPontuais,
-    conquistados
-  };
+  return { totalProducao, melhorSequencia, sequenciaAtual, semanaAtual, tarefasConcluidas:totalTarefasConcluidas, tarefasPontuais:totalTarefasPontuais, conquistados };
 }
 function paginaEmblemasV325(usuario, resumo) {
   const conquistados = new Map((resumo.conquistados || []).map(x => [String(x.codigo), x]));
@@ -22370,21 +22322,25 @@ function paginaEmblemasV325(usuario, resumo) {
   const dataCurta = v => v ? escapeHtml(dataCurtaComunicacaoV322(v)) : "—";
   const cartoes = (lista) => lista.map(e => {
     const obtido = conquistados.get(e.codigo);
-    const atual = e.categoria === "PRODUCAO"
-      ? Number(resumo.totalProducao || 0)
-      : e.categoria === "CONSISTENCIA"
-        ? Number(resumo.melhorSequencia || 0)
-        : e.metrica === "PONTUAIS"
-          ? Number(resumo.tarefasPontuais || 0)
-          : Number(resumo.tarefasConcluidas || 0);
+    const atual = e.categoria === "PRODUCAO" ? Number(resumo.totalProducao || 0) : Number(resumo.melhorSequencia || 0);
     const restante = Math.max(0, Number(e.meta || 0) - atual);
     const pct = Math.min(100, Math.round(atual / Number(e.meta || 1) * 100));
     return `<article class="card emblema-card-v325 ${obtido ? "conquistado" : "bloqueado"}">
       <div class="emblema-icone-v325">${e.icone}</div>
-      <div class="emblema-conteudo-v325"><div class="mini">${e.raridade ? `${escapeHtml(e.raridade)} · ` : ""}${e.categoria === "PRODUCAO" ? "PRODUÇÃO ACUMULADA" : e.categoria === "CONSISTENCIA" ? "SEMANAS DE META" : "AGENDA E TAREFAS"}</div><h3>${escapeHtml(e.titulo)}</h3><p>${escapeHtml(e.descricao)}</p>
-      ${obtido ? `<span class="badge ok">Conquistado</span><div class="mini" style="margin-top:7px">Registro: ${dataCurta(obtido.conquistado_em)}</div>` : `<span class="badge neutro">Ainda não conquistado</span><div class="emblema-progresso-v325"><span style="width:${pct}%"></span></div><div class="mini">${e.categoria === "PRODUCAO" ? `${restante} unidade(s) restantes` : e.categoria === "CONSISTENCIA" ? `${restante} semana(s) na melhor sequência` : e.metrica === "PONTUAIS" ? `${restante} tarefa(s) pontual(is) restantes` : `${restante} tarefa(s) concluída(s) restantes`}</div>`}
+      <div class="emblema-conteudo-v325"><div class="mini">${e.categoria === "PRODUCAO" ? "PRODUÇÃO ACUMULADA" : "SEMANAS DE META"}</div><h3>${escapeHtml(e.titulo)}</h3><p>${escapeHtml(e.descricao)}</p>
+      ${obtido ? `<span class="badge ok">Conquistado</span><div class="mini" style="margin-top:7px">Registro: ${dataCurta(obtido.conquistado_em)}</div>` : `<span class="badge neutro">Ainda não conquistado</span><div class="emblema-progresso-v325"><span style="width:${pct}%"></span></div><div class="mini">${e.categoria === "PRODUCAO" ? `${restante} unidade(s) restantes` : `${restante} semana(s) na melhor sequência`}</div>`}
       </div>
     </article>`;
+  }).join("");
+  const cartoesTarefas = () => EMBLEMAS_TAREFAS_V326.map(e => {
+    const obtido = conquistados.get(e.codigo);
+    const atual = e.metrica === "PONTUAIS" ? Number(resumo.tarefasPontuais || 0) : Number(resumo.tarefasConcluidas || 0);
+    const restante = Math.max(0, Number(e.meta || 0) - atual);
+    const pct = Math.min(100, Math.round(atual / Number(e.meta || 1) * 100));
+    const detalhe = obtido
+      ? '<span class="badge ok">Conquistado</span><div class="mini" style="margin-top:7px">Registro: ' + dataCurta(obtido.conquistado_em) + '</div>'
+      : '<span class="badge neutro">Ainda não conquistado</span><div class="emblema-progresso-v325"><span style="width:' + pct + '%"></span></div><div class="mini">' + restante + (e.metrica === "PONTUAIS" ? " tarefa(s) pontual(is) restantes" : " tarefa(s) concluída(s) restantes") + '</div>';
+    return '<article class="card emblema-card-v325 ' + (obtido ? "conquistado" : "bloqueado") + '"><div class="emblema-icone-v325">' + e.icone + '</div><div class="emblema-conteudo-v325"><div class="mini">' + escapeHtml(e.raridade) + ' · AGENDA E TAREFAS</div><h3>' + escapeHtml(e.titulo) + '</h3><p>' + escapeHtml(e.descricao) + '</p>' + detalhe + '</div></article>';
   }).join("");
   const metaAtual = Number(resumo.semanaAtual?.meta || 0), producaoAtual = Number(resumo.semanaAtual?.producao || 0);
   return layout(`
@@ -22409,7 +22365,7 @@ function paginaEmblemasV325(usuario, resumo) {
     </section>
     <h3>🥇 Produção acumulada</h3><p class="nota">Cada operação/unidade concluída atribuída ao seu usuário conta uma vez, seguindo a mesma fonte do histórico de Minha Produção. Retrabalhos não entram.</p><div class="emblemas-grade-v325">${cartoes(EMBLEMAS_PRODUCAO_V325)}</div>
     <h3>🔥 Consistência semanal</h3><p class="nota">Uma semana é considerada atingida quando a quantidade de pacientes válidos (no Digital, pacientes únicos por setor/dia) alcança a soma das metas diárias vigentes de segunda a sexta. Sábado e domingo não entram na meta semanal.</p><div class="emblemas-grade-v325">${cartoes(EMBLEMAS_SEQUENCIA_V325)}</div>
-    <h3>📅 Agenda e tarefas</h3><p class="nota">Só contam tarefas criadas por um Administrador, atribuídas ao colaborador e concluídas pelo próprio responsável. Pontualidade considera a data limite local; tarefas sem prazo contam apenas para a conquista de conclusão.</p><div class="emblemas-grade-v325">${cartoes(EMBLEMAS_TAREFAS_V326)}</div>
+    <h3>📅 Agenda e tarefas</h3><p class="nota">Só contam tarefas criadas por um Administrador, atribuídas ao colaborador e concluídas pelo próprio responsável. Pontualidade considera a data local; tarefas sem prazo contam apenas para a conquista de conclusão.</p><div class="emblemas-grade-v325">${cartoesTarefas()}</div>
     <section class="card"><h3>Como os emblemas funcionam</h3><p class="nota">Os emblemas são registros permanentes e individuais. Eles não geram pagamento, não alteram a bonificação, não mudam o ranking e não modificam a produção. A coleção é atualizada quando você abre esta página; conquistas novas também aparecem na Central de Notificações.</p></section>
   `, "Minha coleção de emblemas", usuario);
 }
