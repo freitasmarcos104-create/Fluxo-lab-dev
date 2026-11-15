@@ -9,8 +9,14 @@ import {
 } from '../worker/core/http.js';
 
 test('escapeHtml neutraliza caracteres que formam markup', () => {
-  assert.equal(escapeHtml('<script title="x">\'&</script>'),
-    '&lt;script title=&quot;x&quot;&gt;&#039;&amp;&lt;/script&gt;');
+  assert.equal(
+    escapeHtml("<script title='x'>&</script>"),
+    '&lt;script title=&#039;x&#039;&gt;&amp;&lt;/script&gt;'
+  );
+  assert.equal(
+    escapeHtml('"texto"'),
+    '&quot;texto&quot;'
+  );
 });
 
 test('htmlResponse aplica status, tipo e headers de segurança', async () => {
