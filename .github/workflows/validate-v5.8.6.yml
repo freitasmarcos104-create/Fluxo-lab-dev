@@ -1,0 +1,29 @@
+name: Validate Fluxo Lab V5.8.6 source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/releases/v5.8.6/**'
+      - '.github/workflows/validate-v5.8.6.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'worker/releases/v5.8.6/**'
+      - '.github/workflows/validate-v5.8.6.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  syntax:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Validate all Worker modules
+        run: npm run check
+        working-directory: worker/releases/v5.8.6
