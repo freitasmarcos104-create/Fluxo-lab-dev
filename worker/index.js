@@ -1,4 +1,3 @@
-// FLUXO LAB V4.0.0 — PONTO DE ENTRADA
-// O aplicativo mantém o comportamento da base V3.25.2, agora com módulos ES.
-// Novos domínios serão extraídos gradualmente sem reescrever o sistema inteiro.
+// FLUXO LAB V5.7.0 — PONTO DE ENTRADA
+// Arquitetura modular: core, domínios, rotas e serviços compartilhados.
 export { default } from "./legacy.js";
