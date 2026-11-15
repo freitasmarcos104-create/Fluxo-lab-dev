@@ -24335,8 +24335,8 @@ export default {
     // Downloads públicos somente dos dois instaladores oficiais.
     if (request.method === "GET" || request.method === "HEAD") {
       const downloads = {
-        "/downloads/windows": { key: "current/Fluxo-Lab-Setup-0.1.4.exe", name: "Fluxo-Lab-Setup-0.1.4.exe", type: "application/octet-stream" },
-        "/downloads/android": { key: "current/Fluxo-Lab-Android-0.1.4.apk", name: "Fluxo-Lab-Android-0.1.4.apk", type: "application/vnd.android.package-archive" }
+        "/downloads/windows": { key: "current/Fluxo-Lab-Setup-0.1.5.exe", name: "Fluxo-Lab-Setup-0.1.5.exe", type: "application/octet-stream" },
+        "/downloads/android": { key: "current/Fluxo-Lab-Android-0.1.5.apk", name: "Fluxo-Lab-Android-0.1.5.apk", type: "application/vnd.android.package-archive" }
       };
       const item = downloads[caminho];
       if (item) {
