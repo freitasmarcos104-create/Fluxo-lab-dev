@@ -1,0 +1,39 @@
+{
+  "name": "fluxo-lab-desktop",
+  "version": "0.1.1",
+  "description": "Aplicativo desktop do Fluxo Lab para homologação",
+  "main": "main.js",
+  "private": true,
+  "author": "Markfree",
+  "license": "UNLICENSED",
+  "scripts": {
+    "start": "electron .",
+    "dist:win": "electron-builder --win nsis",
+    "dist:portable": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "45.3.3",
+    "electron-builder": "26.18.1"
+  },
+  "build": {
+    "appId": "br.com.markfree.fluxolab",
+    "productName": "Fluxo Lab",
+    "directories": { "output": "dist" },
+    "files": ["main.js", "preload.js", "config.json", "package.json"],
+    "asar": true,
+    "win": {
+      "target": [{ "target": "nsis", "arch": ["x64"] }]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Fluxo Lab",
+      "deleteAppDataOnUninstall": false
+    },
+    "portable": { "artifactName": "Fluxo-Lab-Portable-${version}.${ext}" }
+  },
+  "engines": { "node": ">=22 <23" }
+}

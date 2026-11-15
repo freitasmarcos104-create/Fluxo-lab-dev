@@ -1,0 +1,9 @@
+{
+  "name": "fluxo-lab-worker",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node --check index.js && node --check legacy.js && node --check core/http.js"
+  },
+  "engines": { "node": ">=22" }
+}
