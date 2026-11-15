@@ -2,5 +2,5 @@
   "appName": "Fluxo Lab",
   "startUrl": "https://fluxo-lab.trainingmav.workers.dev/",
   "allowedHosts": ["fluxo-lab.trainingmav.workers.dev"],
-  "accessHosts": ["cloudflareaccess.com", "dash.cloudflare.com"]
+  "accessHosts": []
 }
