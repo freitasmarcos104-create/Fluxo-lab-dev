@@ -1,7 +1,7 @@
-FLUXO LAB ANDROID — APK DEBUG (HOMOLOGAÇÃO)
+FLUXO LAB ANDROID — APK DE PRODUÇÃO
 
 Projeto Android em Java + WebView.
-URL: https://fluxo-lab-homologacao.trainingmav.workers.dev/
+URL: https://fluxo-lab.trainingmav.workers.dev/
 
 Requisitos: Android Studio recente, JDK 17, Android SDK Platform 36, Build Tools 36.0.0 e Gradle 8.13.
 
@@ -9,4 +9,4 @@ Abra esta pasta no Android Studio e sincronize o Gradle. Depois use Build > Buil
 
 Recursos: JavaScript, DOM Storage, cookies, navegação limitada à homologação/Cloudflare Access, links externos em outros aplicativos, seletor de arquivos e downloads com cookie da sessão.
 
-O APK debug é apenas para testes. Não publique na Play Store. Para release, configure keystore privada fora do repositório. Não altere a URL para produção sem autorização.
+A versão release é assinada com a keystore permanente do projeto. As próximas versões devem reutilizar exatamente a mesma keystore, alias e senhas, sempre aumentando versionCode. A chave privada nunca deve ser enviada ao repositório. O aplicativo exige internet.

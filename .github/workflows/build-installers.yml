@@ -14,7 +14,7 @@ permissions:
 
 jobs:
   windows:
-    name: Windows EXE (homologação)
+    name: Windows EXE (principal)
     runs-on: windows-latest
     steps:
       - name: Checkout source
@@ -33,13 +33,13 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
-          name: fluxo-lab-windows-exe-homologacao
+          name: fluxo-lab-windows-exe-0.1.3
           path: desktop/dist/*.exe
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
 
   android:
-    name: Android APK debug (homologação)
+    name: Android APK (assinatura permanente)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source
@@ -57,13 +57,44 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.13'
-      - name: Build debug APK
-        run: gradle --no-daemon assembleDebug
+      - name: Check signing secrets
+        id: signing
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "Assinatura ainda não configurada. O APK de produção será pulado com segurança."
+          fi
+      - name: Restore permanent Android key
+        if: steps.signing.outputs.available == 'true'
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/fluxolab-release.p12"
+          echo "ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/fluxolab-release.p12" >> "$GITHUB_ENV"
+      - name: Build signed Android APK
+        if: steps.signing.outputs.available == 'true'
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: gradle --no-daemon assembleRelease
         working-directory: android
-      - name: Upload Android APK
+      - name: Upload signed Android APK
+        if: steps.signing.outputs.available == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: fluxo-lab-android-apk-homologacao
-          path: android/app/build/outputs/apk/debug/*.apk
+          name: fluxo-lab-android-apk-0.1.3-assinado
+          path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+      - name: Report missing Android signing setup
+        if: steps.signing.outputs.available != 'true'
+        run: echo "Configure os quatro segredos do Android no GitHub para gerar o APK assinado."

@@ -6,7 +6,7 @@
     <application
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
-        android:label="Fluxo Lab (Homologação)"
+        android:label="Fluxo Lab"
         android:icon="@drawable/ic_fluxolab"
         android:roundIcon="@drawable/ic_fluxolab"
         android:theme="@style/AppTheme"
