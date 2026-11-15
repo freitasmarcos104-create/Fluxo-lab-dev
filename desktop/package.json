@@ -1,6 +1,6 @@
 {
   "name": "fluxo-lab-desktop",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Aplicativo desktop do Fluxo Lab para homologação",
   "main": "main.js",
   "private": true,
