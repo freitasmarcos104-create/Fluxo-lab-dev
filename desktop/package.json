@@ -18,11 +18,23 @@
   "build": {
     "appId": "br.com.markfree.fluxolab",
     "productName": "Fluxo Lab",
-    "directories": { "output": "dist" },
-    "files": ["main.js", "preload.js", "config.json", "package.json"],
+    "directories": {
+      "buildResources": "assets",
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "config.json",
+      "package.json",
+      "assets/**/*"
+    ],
     "asar": true,
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }]
+      "icon": "assets/fluxolab.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] }
+      ]
     },
     "nsis": {
       "oneClick": false,
@@ -33,7 +45,9 @@
       "shortcutName": "Fluxo Lab",
       "deleteAppDataOnUninstall": false
     },
-    "portable": { "artifactName": "Fluxo-Lab-Portable-${version}.${ext}" }
+    "portable": {
+      "artifactName": "Fluxo-Lab-Portable-${version}.${ext}"
+    }
   },
   "engines": { "node": ">=22 <23" }
 }
