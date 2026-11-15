@@ -31,7 +31,7 @@ jobs:
         run: npm run dist:win
         working-directory: desktop
       - name: Upload Windows installer
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: fluxo-lab-windows-exe-homologacao
           path: desktop/dist/*.exe
@@ -61,7 +61,7 @@ jobs:
         run: gradle --no-daemon assembleDebug
         working-directory: android
       - name: Upload Android APK
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: fluxo-lab-android-apk-homologacao
           path: android/app/build/outputs/apk/debug/*.apk
