@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.os.Build;
 import android.view.WindowInsets;
 import android.os.Environment;
+import android.view.WindowInsetsController;
 import android.webkit.CookieManager;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
@@ -21,6 +22,7 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
+    private static final int COLOR_PETROLEO = android.graphics.Color.rgb(9, 38, 41);
     private static final String START_URL = "https://fluxo-lab.trainingmav.workers.dev/";
     private static final String APP_HOST = "fluxo-lab.trainingmav.workers.dev";
     private static final int FILE_CHOOSER_REQUEST = 4102;
@@ -31,11 +33,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(android.graphics.Color.rgb(244, 247, 248));
-        getWindow().setNavigationBarColor(android.graphics.Color.rgb(244, 247, 248));
-        getWindow().getDecorView().setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        aplicarBarrasDoSistema();
 
         webView = new WebView(this);
+        webView.setBackgroundColor(COLOR_PETROLEO);
         setContentView(webView);
         webView.setOnApplyWindowInsetsListener((view, insets) -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
