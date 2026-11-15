@@ -33,7 +33,7 @@ jobs:
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
-          name: fluxo-lab-windows-exe-0.1.4
+          name: fluxo-lab-windows-exe-0.1.5
           path: desktop/dist/*.exe
           if-no-files-found: error
           retention-days: 30
@@ -92,7 +92,7 @@ jobs:
         if: steps.signing.outputs.available == 'true'
         uses: actions/upload-artifact@v7
         with:
-          name: fluxo-lab-android-apk-0.1.4-assinado
+          name: fluxo-lab-android-apk-0.1.5-assinado
           path: android/app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 30
