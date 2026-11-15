@@ -22274,7 +22274,7 @@ async function calcularResumoEmblemasV325(env, usuario) {
     "  FROM agenda_tarefas_v323 t\n" +
     "  INNER JOIN usuarios criador ON criador.id=t.criado_por\n" +
     "  INNER JOIN agenda_tarefas_historico_v323 h ON h.id=(SELECT hx.id FROM agenda_tarefas_historico_v323 hx WHERE hx.tarefa_id=t.id AND hx.evento='STATUS' ORDER BY hx.criado_em DESC,hx.id DESC LIMIT 1)\n" +
-    "  WHERE t.responsavel_id=? AND criador.perfil='ADMINISTRADOR' AND t.status='CONCLUIDA'\n" +
+    "  WHERE t.responsavel_id=? AND t.criado_por<>t.responsavel_id AND criador.perfil='ADMINISTRADOR' AND t.status='CONCLUIDA'\n" +
     "    AND h.status_novo='CONCLUIDA' AND h.usuario_id=t.responsavel_id\n" +
     ")\n" +
     "SELECT COUNT(*) AS tarefas_concluidas,\n" +
