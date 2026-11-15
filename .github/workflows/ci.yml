@@ -1,0 +1,29 @@
+name: Validate Fluxo Lab source
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'worker/**'
+      - 'tests/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  worker-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Check Worker syntax
+        run: npm run check
+        working-directory: worker
+      - name: Run core tests
+        run: node --test tests/worker-core.test.mjs
