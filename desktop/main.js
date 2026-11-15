@@ -5,7 +5,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
-const FALLBACK_URL = 'https://fluxo-lab.trainingmav.workers.dev/';
+const FALLBACK_URL = 'https://app.markfree.com.br/';
 
 function readConfig() {
   try {
@@ -18,7 +18,7 @@ function readConfig() {
     return {
       appName: 'Fluxo Lab',
       startUrl: FALLBACK_URL,
-      allowedHosts: ['fluxo-lab.trainingmav.workers.dev'],
+      allowedHosts: ['app.markfree.com.br'],
       accessHosts: []
     };
   }
