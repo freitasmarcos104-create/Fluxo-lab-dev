@@ -134,6 +134,32 @@ public class MainActivity extends Activity {
         else webView.restoreState(savedInstanceState);
     }
 
+    private void aplicarBarrasDoSistema() {
+        android.view.Window window = getWindow();
+        window.setStatusBarColor(COLOR_PETROLEO);
+        window.setNavigationBarColor(COLOR_PETROLEO);
+        window.getDecorView().setBackgroundColor(COLOR_PETROLEO);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.setStatusBarContrastEnforced(false);
+            window.setNavigationBarContrastEnforced(false);
+        }
+
+        // Mantém relógio, sinal, bateria e navegação com símbolos brancos.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsAppearance(
+                    0,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                );
+            }
+        } else {
+            window.getDecorView().setSystemUiVisibility(0);
+        }
+    }
+
     private boolean isInternal(Uri uri) {
         if (uri == null || !"https".equalsIgnoreCase(uri.getScheme())) return false;
         String host = uri.getHost();
