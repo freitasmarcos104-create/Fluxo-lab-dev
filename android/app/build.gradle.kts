@@ -3,6 +3,16 @@ plugins {
 }
 
 android {
+    signingConfigs {
+        create("release") {
+            storeFile = file(System.getenv("ANDROID_KEYSTORE_PATH") ?: "${buildDir}/missing-release-key.p12")
+            storeType = "PKCS12"
+            storePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD") ?: ""
+            keyAlias = System.getenv("ANDROID_KEY_ALIAS") ?: ""
+            keyPassword = System.getenv("ANDROID_KEY_PASSWORD") ?: ""
+        }
+    }
+
     namespace = "br.com.markfree.fluxolab"
     compileSdk = 36
 
@@ -10,8 +20,8 @@ android {
         applicationId = "br.com.markfree.fluxolab"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.2"
+        versionCode = 3
+        versionName = "0.1.3"
     }
 
     buildTypes {
@@ -21,7 +31,7 @@ android {
         }
         release {
             isMinifyEnabled = false
-            // A assinatura release será configurada externamente com keystore privada.
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
