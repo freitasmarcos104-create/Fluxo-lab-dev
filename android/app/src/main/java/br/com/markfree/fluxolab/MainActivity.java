@@ -9,6 +9,7 @@ import android.os.Bundle;
 import android.os.Build;
 import android.view.WindowInsets;
 import android.os.Environment;
+import android.view.WindowInsetsController;
 import android.webkit.CookieManager;
 import android.webkit.URLUtil;
 import android.webkit.ValueCallback;
@@ -21,6 +22,7 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
+    private static final int COLOR_PETROLEO = android.graphics.Color.rgb(9, 38, 41);
     private static final String START_URL = "https://fluxo-lab.trainingmav.workers.dev/";
     private static final String APP_HOST = "fluxo-lab.trainingmav.workers.dev";
     private static final int FILE_CHOOSER_REQUEST = 4102;
@@ -31,11 +33,10 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().setStatusBarColor(android.graphics.Color.rgb(244, 247, 248));
-        getWindow().setNavigationBarColor(android.graphics.Color.rgb(244, 247, 248));
-        getWindow().getDecorView().setSystemUiVisibility(android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR);
+        aplicarBarrasDoSistema();
 
         webView = new WebView(this);
+        webView.setBackgroundColor(COLOR_PETROLEO);
         setContentView(webView);
         webView.setOnApplyWindowInsetsListener((view, insets) -> {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -131,6 +132,32 @@ public class MainActivity extends Activity {
 
         if (savedInstanceState == null) webView.loadUrl(START_URL);
         else webView.restoreState(savedInstanceState);
+    }
+
+    private void aplicarBarrasDoSistema() {
+        android.view.Window window = getWindow();
+        window.setStatusBarColor(COLOR_PETROLEO);
+        window.setNavigationBarColor(COLOR_PETROLEO);
+        window.getDecorView().setBackgroundColor(COLOR_PETROLEO);
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            window.setStatusBarContrastEnforced(false);
+            window.setNavigationBarContrastEnforced(false);
+        }
+
+        // Mantém relógio, sinal, bateria e navegação com símbolos brancos.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            WindowInsetsController controller = window.getInsetsController();
+            if (controller != null) {
+                controller.setSystemBarsAppearance(
+                    0,
+                    WindowInsetsController.APPEARANCE_LIGHT_STATUS_BARS
+                        | WindowInsetsController.APPEARANCE_LIGHT_NAVIGATION_BARS
+                );
+            }
+        } else {
+            window.getDecorView().setSystemUiVisibility(0);
+        }
     }
 
     private boolean isInternal(Uri uri) {
