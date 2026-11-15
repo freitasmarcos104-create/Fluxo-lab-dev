@@ -1,0 +1,11 @@
+{
+  "name": "fluxo-lab-worker-v5.8.5",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "check": "node check-syntax.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
