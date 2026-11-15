@@ -21,10 +21,8 @@ import android.webkit.WebViewClient;
 import android.widget.Toast;
 
 public class MainActivity extends Activity {
-    private static final String START_URL = "https://fluxo-lab-homologacao.trainingmav.workers.dev/";
-    private static final String APP_HOST = "fluxo-lab-homologacao.trainingmav.workers.dev";
-    private static final String ACCESS_SUFFIX = "cloudflareaccess.com";
-    private static final String CLOUDFLARE_LOGIN_SUFFIX = "dash.cloudflare.com";
+    private static final String START_URL = "https://fluxo-lab.trainingmav.workers.dev/";
+    private static final String APP_HOST = "fluxo-lab.trainingmav.workers.dev";
     private static final int FILE_CHOOSER_REQUEST = 4102;
 
     private WebView webView;
@@ -140,8 +138,7 @@ public class MainActivity extends Activity {
         String host = uri.getHost();
         if (host == null) return false;
         host = host.toLowerCase();
-        return APP_HOST.equals(host) || host.equals(ACCESS_SUFFIX) || host.endsWith("." + ACCESS_SUFFIX)
-            || host.equals(CLOUDFLARE_LOGIN_SUFFIX) || host.endsWith("." + CLOUDFLARE_LOGIN_SUFFIX);
+        return APP_HOST.equals(host);
     }
 
     private void openExternal(Uri uri) {
