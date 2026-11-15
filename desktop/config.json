@@ -1,6 +1,6 @@
 {
   "appName": "Fluxo Lab",
-  "startUrl": "https://fluxo-lab.trainingmav.workers.dev/",
-  "allowedHosts": ["fluxo-lab.trainingmav.workers.dev"],
+  "startUrl": "https://app.markfree.com.br/",
+  "allowedHosts": ["app.markfree.com.br"],
   "accessHosts": []
 }

@@ -1,12 +1,12 @@
-FLUXO LAB ANDROID — APK DE PRODUÇÃO
+FLUXO LAB ANDROID — APK OFICIAL
 
-Projeto Android em Java + WebView.
-URL: https://fluxo-lab.trainingmav.workers.dev/
+Aplicativo Android em Java + WebView conectado ao sistema central.
+URL oficial: https://app.markfree.com.br/
 
-Requisitos: Android Studio recente, JDK 17, Android SDK Platform 36, Build Tools 36.0.0 e Gradle 8.13.
+Requisitos: JDK 17, Android SDK Platform 36, Build Tools 36.0.0 e Gradle 8.13.
 
-Abra esta pasta no Android Studio e sincronize o Gradle. Depois use Build > Build Bundle(s) / APK(s) > Build APK(s). O GitHub Actions também compila o APK debug.
+O aplicativo acessa a mesma versão de produção usada no navegador e no Windows. Atualizações de telas, regras, emblemas e dados são feitas no servidor central; não é necessário reconstruir o APK para cada atualização do sistema.
 
-Recursos: JavaScript, DOM Storage, cookies, navegação limitada à homologação/Cloudflare Access, links externos em outros aplicativos, seletor de arquivos e downloads com cookie da sessão.
+Recursos: JavaScript, DOM Storage, cookies, navegação limitada ao domínio oficial, links externos em outros aplicativos, seletor de arquivos e downloads com cookie da sessão.
 
-A versão release é assinada com a keystore permanente do projeto. As próximas versões devem reutilizar exatamente a mesma keystore, alias e senhas, sempre aumentando versionCode. A chave privada nunca deve ser enviada ao repositório. O aplicativo exige internet.
+A versão release reutiliza a keystore permanente do projeto, sem alterar o applicationId. As próximas versões devem manter exatamente a mesma keystore, alias e senhas, sempre aumentando versionCode. A chave privada nunca deve ser enviada ao repositório. O aplicativo exige internet.
