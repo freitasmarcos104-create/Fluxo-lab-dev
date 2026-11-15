@@ -37,6 +37,8 @@ jobs:
           GH_PUBLISH_TOKEN: ${{ github.token }}
           PUBLISH_BASE: https://fluxo-lab-upload-once-20261115.trainingmav.workers.dev
         run: |
+          EXE="$(find desktop/dist -maxdepth 1 -name '*.exe' -print -quit)"
+          test -n "$EXE"
           node --input-type=module - "$EXE" <<'NODE'
           import fs from 'node:fs';
           const [file] = process.argv.slice(2);
