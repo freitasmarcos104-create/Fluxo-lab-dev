@@ -53,15 +53,21 @@ test('headers de segurança incluem no-sniff e política de frame', () => {
 test('ficha de produção usa o renderizador de etapa existente', async () => {
   const source = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
   const inicio = source.indexOf('function cardEtapaFichaV3417(');
-  const fim = source.indexOf('\\nfunction blocoArcada(', inicio);
+  const fim = source.indexOf('function blocoArcada(', inicio);
   assert.ok(inicio >= 0 && fim > inicio, 'função de renderização da ficha deve existir');
   const helper = source.slice(inicio, fim);
-  assert.match(helper, /const html = cardEtapaBaseV336\\(usuario, etapa\\);/);
-  assert.doesNotMatch(helper, /cardEtapa\\(usuario, etapa\\)/);
+  assert.ok(helper.includes('const html = cardEtapaBaseV336(usuario, etapa);'));
+  assert.ok(!helper.includes('cardEtapa(usuario, etapa)'));
 });
 
 test('pacotes excluídos não aparecem nas listagens digitais', async () => {
   const source = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
-  assert.match(source, /WHERE p\\.trabalho_id=\\?\\s+AND p\\.status!='EXCLUIDO'/);
-  assert.match(source, /WHERE p\\.status!='EXCLUIDO'\\s+AND\\s+\\(/);
+  const inicioTrabalho = source.indexOf('async function listarPacotesTrabalhoV321(');
+  const inicioVisiveis = source.indexOf('async function listarPacotesVisiveisV321(');
+  const fimVisiveis = source.indexOf('async function registrarEventoPacoteV321(', inicioVisiveis);
+  assert.ok(inicioTrabalho >= 0 && inicioVisiveis > inicioTrabalho && fimVisiveis > inicioVisiveis);
+  const porTrabalho = source.slice(inicioTrabalho, inicioVisiveis);
+  const visiveis = source.slice(inicioVisiveis, fimVisiveis);
+  assert.ok(porTrabalho.includes("AND p.status!='EXCLUIDO'"));
+  assert.ok(visiveis.includes("WHERE p.status!='EXCLUIDO'"));
 });
