@@ -1,6 +1,11 @@
-// Fluxo Lab — catálogo aditivo de 50 conquistas profissionais.
-// Os valores de métricas são agregados pelo domínio da aplicação; este módulo não acessa D1.
-export const ACHIEVEMENT_CATALOG_VERSION = "1.0.0";
+// Fluxo Lab — catálogo de emblemas V2.0.0
+//
+// Este módulo é puro: não acessa D1, rede nem relógio. Contém apenas emblemas que podem ser COMPROVADOS:
+//   1) Expansão automática: usa dados que o sistema já registra (produção, semanas com meta, tarefas).
+//   2) Organização e limpeza: concedidos por um administrador, com registro auditável (quem, quando, por quê).
+// Os demais emblemas do catálogo 1.0.0 foram adiados (ver docs/achievements-expansion.md).
+
+export const ACHIEVEMENT_CATALOG_VERSION = "2.0.0";
 
 export const RARITIES = Object.freeze({
   comum: { label: "Comum", color: "#A0A5AD", order: 1 },
@@ -14,91 +19,251 @@ export const RARITIES = Object.freeze({
   secreto: { label: "Secreto", color: "#8B78E8", order: 9 }
 });
 
-const item = (id, name, category, rarity, metric, target, verification = "automatico", unit = "registros") => ({
-  id, name, category, rarity, metric, target, verification, unit
-});
+// ---------------------------------------------------------------------------
+// 1) Expansão automática — mesmo formato dos arrays existentes em legacy.js
+//    (EMBLEMAS_PRODUCAO_V325, EMBLEMAS_SEQUENCIA_V325, EMBLEMAS_TAREFAS_V326).
+//    Não exigem tabela nova: a gravação usa emblemas_conquistas_v325.
+// ---------------------------------------------------------------------------
 
-export const NEW_ACHIEVEMENTS = Object.freeze([
-  // CAD/CAM — 8
-  item("cad_arquivo_completo", "Arquivo Completo", "cad_cam", "bronze", "cad.complete_files", 10),
-  item("cad_planejamento_digital", "Planejamento Digital", "cad_cam", "bronze", "cad.planned_projects", 10),
-  item("cad_malha_validada", "Malha Validada", "cad_cam", "prata", "cad.validated_meshes", 20, "misto"),
-  item("cad_margem_conferida", "Margem Conferida", "cad_cam", "prata", "cad.margin_checks", 20, "misto"),
-  item("cad_oclusal_revisada", "Oclusão Revisada", "cad_cam", "ouro", "cad.occlusion_reviews", 20, "misto"),
-  item("cad_biblioteca_correta", "Biblioteca Correta", "cad_cam", "prata", "cad.library_uses", 15),
-  item("cad_fluxo_digital_completo", "Fluxo Digital Completo", "cad_cam", "platina", "cad.handoffs_to_slicing", 30),
-  item("cad_resgate_digital", "Resgate Digital", "cad_cam", "ouro", "cad.recovered_projects", 10),
-
-  // Trabalhos manuais — 7
-  item("manual_mao_na_massa", "Mão na Massa", "manual", "comum", "manual.completed", 10),
-  item("manual_montagem_anatomica", "Montagem Anatômica", "manual", "prata", "manual.approved_assemblies", 15, "misto"),
-  item("manual_escultura_detalhe", "Escultura de Detalhe", "manual", "prata", "manual.approved_sculptures", 10, "misto"),
-  item("manual_ajuste_oclusal", "Ajuste Oclusal Manual", "manual", "ouro", "manual.approved_occlusal_adjustments", 20, "misto"),
-  item("manual_reparo_precisao", "Reparo de Precisão", "manual", "ouro", "manual.completed_repairs", 5, "misto"),
-  item("manual_tecnica_multimaterial", "Técnica Multimaterial", "manual", "platina", "manual.distinct_techniques", 3, "misto", "técnicas"),
-  item("manual_artesao_excelencia", "Artesão de Excelência", "manual", "diamante", "manual.approved_final_inspections", 100, "misto"),
-
-  // Fatiamento — 7
-  item("slice_perfil_configurado", "Perfil Configurado", "fatiamento", "comum", "slicing.validated_profiles", 1, "misto"),
-  item("slice_suportes_planejados", "Suportes Bem Planejados", "fatiamento", "bronze", "slicing.supports_checked", 20, "misto"),
-  item("slice_orientacao_inteligente", "Orientação Inteligente", "fatiamento", "prata", "slicing.validated_orientations", 20, "misto"),
-  item("slice_bandeja_organizada", "Bandeja Organizada", "fatiamento", "bronze", "slicing.compatible_batches", 10, "misto"),
-  item("slice_aproveitamento_plataforma", "Aproveitamento de Plataforma", "fatiamento", "ouro", "slicing.platforms_at_70_percent", 10, "misto", "bandejas"),
-  item("slice_pre_voo_digital", "Pré-voo Digital", "fatiamento", "ouro", "slicing.preflight_checks", 30, "misto"),
-  item("slice_rastreavel", "Fatiamento Rastreável", "fatiamento", "platina", "slicing.traceable_exports", 50),
-
-  // Impressão 3D — 8
-  item("print_partida_segura", "Partida Segura", "impressao_3d", "comum", "printing.preflight_checks", 10),
-  item("print_cuba_inspecionada", "Cuba Inspecionada", "impressao_3d", "bronze", "printing.vat_inspections", 10, "misto"),
-  item("print_plataforma_verificada", "Plataforma Verificada", "impressao_3d", "prata", "printing.platform_checks", 15, "misto"),
-  item("print_resina_rastreada", "Resina Rastreada", "impressao_3d", "ouro", "printing.resin_traceability_records", 30),
-  item("print_bandeja_integral", "Bandeja Integral", "impressao_3d", "platina", "printing.fully_approved_batches", 10, "misto"),
-  item("print_pos_processamento", "Pós-processamento Padrão", "impressao_3d", "ouro", "printing.wash_cure_records", 20),
-  item("print_manutencao_preventiva", "Manutenção Preventiva 3D", "impressao_3d", "platina", "printing.preventive_maintenance_cycles", 3, "misto", "ciclos"),
-  item("print_guardiao_impressora", "Guardião da Impressora", "impressao_3d", "diamante", "printing.inspected_prints", 100, "misto"),
-
-  // Acabamento — 7
-  item("finish_remocao_cuidadosa", "Remoção Cuidadosa", "acabamento", "comum", "finishing.damage_free_removals", 20, "misto"),
-  item("finish_anatomia_preservada", "Anatomia Preservada", "acabamento", "prata", "finishing.approved_anatomy", 20, "misto"),
-  item("finish_uniao_discreta", "Linha de União Discreta", "acabamento", "ouro", "finishing.approved_joints", 15, "misto"),
-  item("finish_polimento_uniforme", "Polimento Uniforme", "acabamento", "ouro", "finishing.uniform_polish_approvals", 25, "misto"),
-  item("finish_adaptacao_conferida", "Adaptação Conferida", "acabamento", "prata", "finishing.fit_checks", 20, "misto"),
-  item("finish_inspecao_360", "Inspeção Final 360°", "acabamento", "platina", "finishing.complete_final_inspections", 30, "misto"),
-  item("finish_pronto_entrega", "Pronto para Entrega", "acabamento", "bronze", "finishing.ready_for_delivery", 20),
-
-  // Organização e limpeza — 7
-  item("room_bancada_preparada", "Bancada Preparada", "organizacao_limpeza", "comum", "workplace.opening_checklists", 5, "misto"),
-  item("room_fechamento_impecavel", "Fechamento Impecável", "organizacao_limpeza", "bronze", "workplace.closing_checklists", 5, "misto"),
-  item("room_ferramental_organizado", "Ferramental Organizado", "organizacao_limpeza", "prata", "workplace.tool_audits_passed", 10, "misto"),
-  item("room_estoque_identificado", "Estoque Identificado", "organizacao_limpeza", "prata", "workplace.identified_materials", 30),
-  item("room_descarte_responsavel", "Descarte Responsável", "organizacao_limpeza", "ouro", "workplace.disposal_records", 10, "misto"),
-  item("room_sala_5s", "Sala 5S", "organizacao_limpeza", "platina", "workplace.weekly_5s_passes", 4, "misto", "semanas"),
-  item("room_guardiao_ambiente", "Guardião do Ambiente", "organizacao_limpeza", "lendario", "workplace.months_without_open_findings", 6, "misto", "meses"),
-
-  // Agenda — 6
-  item("agenda_planejamento_semanal", "Planejamento Semanal", "agenda", "comum", "agenda.consecutive_planned_weeks", 4),
-  item("agenda_compromisso_confirmado", "Compromisso Confirmado", "agenda", "bronze", "agenda.confirmed_commitments", 15),
-  item("agenda_pontualidade", "Pontualidade de Agenda", "agenda", "prata", "agenda.tasks_completed_on_time", 20),
-  item("agenda_sem_conflitos", "Agenda sem Conflitos", "agenda", "ouro", "agenda.days_without_conflicts", 30),
-  item("agenda_pendencias_resolvidas", "Pendências Resolvidas", "agenda", "platina", "agenda.tasks_completed_or_rescheduled_before_due", 30),
-  item("agenda_retorno_programado", "Retorno Programado", "agenda", "diamante", "agenda.completed_jobs_with_followup", 20)
+export const EMBLEMAS_PRODUCAO_EXPANSAO = Object.freeze([
+  { codigo: "PRODUCAO_1000", categoria: "PRODUCAO", titulo: "Milhar de produção", descricao: "1.000 unidades de produção concluídas.", icone: "💠", meta: 1000 },
+  { codigo: "PRODUCAO_1500", categoria: "PRODUCAO", titulo: "Mestre da produção", descricao: "1.500 unidades de produção concluídas.", icone: "🌟", meta: 1500 },
+  { codigo: "PRODUCAO_2000", categoria: "PRODUCAO", titulo: "Titã da produção", descricao: "2.000 unidades de produção concluídas.", icone: "🔱", meta: 2000 }
 ]);
 
-export function getAchievementProgress(achievement, metrics = {}) {
-  const raw = Number(metrics[achievement.metric] ?? 0);
-  const current = Number.isFinite(raw) ? Math.max(0, raw) : 0;
-  const target = achievement.target;
-  return Object.freeze({
-    current: Math.min(current, target),
-    target,
-    percent: Math.min(100, Math.floor((current / target) * 100)),
-    unlocked: current >= target
+export const EMBLEMAS_SEQUENCIA_EXPANSAO = Object.freeze([
+  { codigo: "META_8_SEMANAS", categoria: "CONSISTENCIA", titulo: "Disciplina de platina", descricao: "Oito semanas completas consecutivas com a meta atingida.", icone: "🌠", meta: 8 },
+  { codigo: "META_12_SEMANAS", categoria: "CONSISTENCIA", titulo: "Trimestre perfeito", descricao: "Doze semanas completas consecutivas com a meta atingida.", icone: "🚀", meta: 12 }
+]);
+
+export const EMBLEMAS_TAREFAS_EXPANSAO = Object.freeze([
+  {
+    codigo: "AGENDA_CONCLUIDAS_25",
+    categoria: "AGENDA",
+    titulo: "Rotina em dia",
+    descricao: "Conclua 25 tarefas atribuídas por um administrador. O prazo não interfere nesta conquista.",
+    icone: "📋",
+    meta: 25,
+    metrica: "CONCLUIDAS",
+    raridade: "PRATA",
+    regra: "TAREFA_ADMIN_CONCLUIDA"
+  },
+  {
+    codigo: "AGENDA_PONTUALIDADE_50",
+    categoria: "AGENDA",
+    titulo: "Pontualidade de Platina",
+    descricao: "Conclua 50 tarefas atribuídas por um administrador até a data limite. Tarefas sem prazo não contam.",
+    icone: "⏱️",
+    meta: 50,
+    metrica: "PONTUAIS",
+    raridade: "PLATINA",
+    regra: "TAREFA_ADMIN_CONCLUIDA_NO_PRAZO"
+  },
+  {
+    codigo: "AGENDA_PONTUALIDADE_100",
+    categoria: "AGENDA",
+    titulo: "Pontualidade de Diamante",
+    descricao: "Conclua 100 tarefas atribuídas por um administrador até a data limite. Tarefas sem prazo não contam.",
+    icone: "🕰️",
+    meta: 100,
+    metrica: "PONTUAIS",
+    raridade: "DIAMANTE",
+    regra: "TAREFA_ADMIN_CONCLUIDA_NO_PRAZO"
+  }
+]);
+
+// ---------------------------------------------------------------------------
+// 2) Organização e limpeza — concedidos por administrador
+// ---------------------------------------------------------------------------
+
+export const TIPOS_RECONHECIMENTO = Object.freeze({
+  ABERTURA_BANCADA: "Abertura de bancada aprovada",
+  FECHAMENTO_BANCADA: "Fechamento de bancada aprovado",
+  AUDITORIA_FERRAMENTAL: "Auditoria de ferramental aprovada",
+  AUDITORIA_ESTOQUE: "Auditoria de estoque aprovada",
+  DESCARTE_CORRETO: "Descarte correto registrado",
+  SEMANA_5S: "Semana de 5S aprovada",
+  AUDITORIA_MENSAL: "Auditoria mensal aprovada"
+});
+
+// contagem:
+//   REGISTROS          cada reconhecimento válido conta 1
+//   DIAS_DISTINTOS     vários reconhecimentos no mesmo dia contam 1
+//   SEMANAS_DISTINTAS  várias no mesma semana (segunda a domingo) contam 1
+//   MESES_CONSECUTIVOS maior sequência de meses seguidos com ao menos um reconhecimento
+export const EMBLEMAS_ORGANIZACAO_LIMPEZA = Object.freeze([
+  {
+    codigo: "ORG_BANCADA_PREPARADA",
+    categoria: "ORGANIZACAO_LIMPEZA",
+    titulo: "Bancada Preparada",
+    descricao: "Cinco aberturas de bancada aprovadas por um administrador.",
+    icone: "🧰",
+    meta: 5,
+    raridade: "COMUM",
+    tipoReconhecimento: "ABERTURA_BANCADA",
+    contagem: "DIAS_DISTINTOS",
+    regra: "RECONHECIMENTO_ADMIN"
+  },
+  {
+    codigo: "ORG_FECHAMENTO_IMPECAVEL",
+    categoria: "ORGANIZACAO_LIMPEZA",
+    titulo: "Fechamento Impecável",
+    descricao: "Cinco fechamentos de bancada aprovados por um administrador.",
+    icone: "🧹",
+    meta: 5,
+    raridade: "BRONZE",
+    tipoReconhecimento: "FECHAMENTO_BANCADA",
+    contagem: "DIAS_DISTINTOS",
+    regra: "RECONHECIMENTO_ADMIN"
+  },
+  {
+    codigo: "ORG_FERRAMENTAL_ORGANIZADO",
+    categoria: "ORGANIZACAO_LIMPEZA",
+    titulo: "Ferramental Organizado",
+    descricao: "Dez auditorias de ferramental aprovadas por um administrador.",
+    icone: "🛠️",
+    meta: 10,
+    raridade: "PRATA",
+    tipoReconhecimento: "AUDITORIA_FERRAMENTAL",
+    contagem: "REGISTROS",
+    regra: "RECONHECIMENTO_ADMIN"
+  },
+  {
+    codigo: "ORG_ESTOQUE_IDENTIFICADO",
+    categoria: "ORGANIZACAO_LIMPEZA",
+    titulo: "Estoque Identificado",
+    descricao: "Dez auditorias de estoque aprovadas por um administrador.",
+    icone: "🏷️",
+    meta: 10,
+    raridade: "PRATA",
+    tipoReconhecimento: "AUDITORIA_ESTOQUE",
+    contagem: "REGISTROS",
+    regra: "RECONHECIMENTO_ADMIN"
+  },
+  {
+    codigo: "ORG_DESCARTE_RESPONSAVEL",
+    categoria: "ORGANIZACAO_LIMPEZA",
+    titulo: "Descarte Responsável",
+    descricao: "Dez descartes corretos registrados por um administrador.",
+    icone: "♻️",
+    meta: 10,
+    raridade: "OURO",
+    tipoReconhecimento: "DESCARTE_CORRETO",
+    contagem: "REGISTROS",
+    regra: "RECONHECIMENTO_ADMIN"
+  },
+  {
+    codigo: "ORG_SALA_5S",
+    categoria: "ORGANIZACAO_LIMPEZA",
+    titulo: "Sala 5S",
+    descricao: "Quatro semanas de 5S aprovadas por um administrador.",
+    icone: "✨",
+    meta: 4,
+    raridade: "PLATINA",
+    tipoReconhecimento: "SEMANA_5S",
+    contagem: "SEMANAS_DISTINTAS",
+    regra: "RECONHECIMENTO_ADMIN"
+  },
+  {
+    codigo: "ORG_GUARDIAO_AMBIENTE",
+    categoria: "ORGANIZACAO_LIMPEZA",
+    titulo: "Guardião do Ambiente",
+    descricao: "Seis meses seguidos com auditoria mensal aprovada por um administrador.",
+    icone: "🛡️",
+    meta: 6,
+    raridade: "LENDARIO",
+    tipoReconhecimento: "AUDITORIA_MENSAL",
+    contagem: "MESES_CONSECUTIVOS",
+    regra: "RECONHECIMENTO_ADMIN"
+  }
+]);
+
+// ---------------------------------------------------------------------------
+// Datas (UTC, formato AAAA-MM-DD)
+// ---------------------------------------------------------------------------
+
+const ISO_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+export function isIsoDate(value) {
+  if (typeof value !== "string") return false;
+  const m = ISO_DATE.exec(value);
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(Date.UTC(y, mo - 1, d));
+  return dt.getUTCFullYear() === y && dt.getUTCMonth() === mo - 1 && dt.getUTCDate() === d;
+}
+
+function inicioSemana(iso) {
+  const [y, m, d] = iso.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  const diaSemana = dt.getUTCDay() || 7; // domingo = 7; semana começa na segunda
+  dt.setUTCDate(dt.getUTCDate() - diaSemana + 1);
+  return dt.toISOString().slice(0, 10);
+}
+
+function indiceMes(iso) {
+  const [y, m] = iso.split("-").map(Number);
+  return y * 12 + (m - 1);
+}
+
+function contar(registros, contagem) {
+  if (contagem === "REGISTROS") return registros.length;
+  if (contagem === "DIAS_DISTINTOS") return new Set(registros.map((r) => r.data_referencia)).size;
+  if (contagem === "SEMANAS_DISTINTAS") return new Set(registros.map((r) => inicioSemana(r.data_referencia))).size;
+  if (contagem === "MESES_CONSECUTIVOS") {
+    const meses = [...new Set(registros.map((r) => indiceMes(r.data_referencia)))].sort((a, b) => a - b);
+    let melhor = 0;
+    let atual = 0;
+    let anterior = null;
+    for (const mes of meses) {
+      atual = anterior !== null && mes === anterior + 1 ? atual + 1 : 1;
+      if (atual > melhor) melhor = atual;
+      anterior = mes;
+    }
+    return melhor;
+  }
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+// Avaliação e validação
+// ---------------------------------------------------------------------------
+
+// reconhecimentos: [{ tipo, data_referencia: "AAAA-MM-DD", revogado_em: null | string }]
+// Reconhecimentos revogados ou com data inválida nunca contam.
+export function avaliarEmblemasAdmin(reconhecimentos = []) {
+  const validos = (Array.isArray(reconhecimentos) ? reconhecimentos : []).filter(
+    (r) => r && !r.revogado_em && isIsoDate(r.data_referencia)
+  );
+  return EMBLEMAS_ORGANIZACAO_LIMPEZA.map((emblema) => {
+    const doTipo = validos.filter((r) => r.tipo === emblema.tipoReconhecimento);
+    const total = contar(doTipo, emblema.contagem);
+    return Object.freeze({
+      ...emblema,
+      atual: Math.min(total, emblema.meta),
+      percentual: Math.min(100, Math.floor((total / emblema.meta) * 100)),
+      conquistado: total >= emblema.meta
+    });
   });
 }
 
-export function evaluateAchievements(metrics = {}) {
-  return NEW_ACHIEVEMENTS.map((achievement) => ({
-    ...achievement,
-    ...getAchievementProgress(achievement, metrics)
-  }));
+// Regras que a rota do administrador deve aplicar antes de gravar um reconhecimento.
+// `hoje` vem do chamador (data local AAAA-MM-DD), mantendo este módulo puro.
+export function validarReconhecimento({ usuarioId, concedidoPor, tipo, dataReferencia, hoje } = {}) {
+  const funcionario = Number(usuarioId);
+  const administrador = Number(concedidoPor);
+  if (!Number.isInteger(funcionario) || funcionario <= 0) return { ok: false, erro: "Funcionário inválido." };
+  if (!Number.isInteger(administrador) || administrador <= 0) return { ok: false, erro: "Administrador inválido." };
+  if (funcionario === administrador) {
+    return { ok: false, erro: "O administrador não pode conceder reconhecimento a si mesmo." };
+  }
+  if (typeof tipo !== "string" || !Object.prototype.hasOwnProperty.call(TIPOS_RECONHECIMENTO, tipo)) {
+    return { ok: false, erro: "Tipo de reconhecimento inválido." };
+  }
+  if (!isIsoDate(dataReferencia)) return { ok: false, erro: "Data do reconhecimento inválida." };
+  if (!isIsoDate(hoje)) return { ok: false, erro: "Data atual inválida." };
+  if (dataReferencia > hoje) return { ok: false, erro: "A data do reconhecimento não pode ser futura." };
+  return { ok: true };
 }

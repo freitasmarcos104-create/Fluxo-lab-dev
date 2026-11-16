@@ -27,3 +27,5 @@ jobs:
         working-directory: worker
       - name: Run core tests
         run: node --test tests/worker-core.test.mjs
+      - name: Run achievements tests
+        run: node --test tests/achievements.test.mjs
