@@ -15,15 +15,19 @@ test('deploy do Worker não aplica migrações D1 nem altera dados', () => {
   assert.doesNotMatch(workerPackage.scripts.deploy, /d1 migrations|sql|r2.*delete/i);
 });
 
-test('pipeline publica apenas depois da validação no push para main', () => {
-  assert.match(workflow, /deploy-production:/);
-  assert.match(workflow, /needs: worker-tests/);
-  assert.match(workflow, /github\.ref == 'refs\/heads\/main'/);
-  assert.match(workflow, /secrets\.CLOUDFLARE_API_TOKEN/);
-  assert.match(workflow, /CLOUDFLARE_ACCOUNT_ID:/);
+test('GitHub Actions valida, mas não publica em produção', () => {
+  assert.match(workflow, /pull_request:/);
+  assert.match(workflow, /npm run validate:release/);
+  assert.doesNotMatch(workflow, /deploy-production:/);
+  assert.doesNotMatch(workflow, /npm run deploy/);
+  assert.doesNotMatch(workflow, /CLOUDFLARE_API_TOKEN/);
 });
 
-test('pull requests validam, mas não publicam em produção', () => {
-  assert.match(workflow, /pull_request:/);
-  assert.match(workflow, /github\.event_name != 'pull_request'/);
+test('validação unificada inclui sintaxe, dry-run Cloudflare e todas as suítes', () => {
+  assert.match(workerPackage.scripts['validate:release'], /npm run check/);
+  assert.match(workerPackage.scripts['validate:release'], /npm run check:cf/);
+  assert.match(workerPackage.scripts['validate:release'], /npm test/);
+  assert.match(workerPackage.scripts.test, /worker-core\.test\.mjs/);
+  assert.match(workerPackage.scripts.test, /achievements\.test\.mjs/);
+  assert.match(workerPackage.scripts.test, /deployment-pipeline\.test\.mjs/);
 });
