@@ -33,7 +33,9 @@ const installers = await readFile(
   'utf8'
 );
 
-test('assinatura do APK usa o segredo correto para a senha da chave privada', () => {
-  assert.ok(installers.includes("ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}"));
-  assert.ok(!installers.includes("ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"));
+test('assinatura PKCS12 usa a senha do keystore e exige apenas três segredos', () => {
+  assert.ok(installers.includes('ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}'));
+  assert.ok(!installers.includes('KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}'));
+  assert.ok(installers.includes('if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" ]]; then'));
+  assert.ok(installers.includes('Configure os três segredos do Android'));
 });
