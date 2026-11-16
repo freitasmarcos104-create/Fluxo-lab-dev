@@ -1,36 +1,51 @@
-# Fluxo Lab — desenvolvimento
+# Fluxo Lab
 
-Repositório privado para evoluir o Fluxo Lab sem interromper a operação do laboratório.
+Aplicação central do laboratório. Site, Windows e Android acessam o mesmo Worker de produção.
 
-## Segurança e ambientes
-- Base importada: Worker V4.0.0, ambiente de homologação.
-- Os clientes Windows e Android apontam somente para https://fluxo-lab-homologacao.trainingmav.workers.dev/.
-- Nenhum workflow publica Worker ou altera D1/R2.
-- Nunca enviar credenciais, tokens, cookies, chaves de assinatura, dados reais de pacientes ou arquivos STL reais.
-- Nunca usar D1/R2 de produção em testes.
-- Toda mudança em banco exige migração numerada, backup, revisão e plano de reversão. Não executar migrações automaticamente.
+## Ambiente oficial
+
+- Endereço: https://app.markfree.com.br/
+- Worker: fluxo-lab
+- Versão de referência sincronizada neste repositório: V5.8.8
+- Código-fonte canônico: worker/
+- Os clientes Windows e Android são apenas interfaces de acesso ao mesmo sistema web; não mantêm banco de dados independente.
+
+## Caminho único de atualização
+
+1. Desenvolver a alteração na pasta worker/ em uma branch.
+2. Abrir Pull Request para main.
+3. O GitHub Actions valida a sintaxe do Worker, a configuração Cloudflare e os testes automatizados.
+4. Depois da aprovação e do merge em main, o Cloudflare Workers Builds publica a pasta worker/ no Worker fluxo-lab.
+5. Alterações de telas, regras e funcionalidades web chegam aos três clientes sem reconstruir EXE ou APK.
+
+O deploy é feito pelo Cloudflare Workers Builds usando a configuração versionada worker/cloudflare.config.ts e o comando npm run deploy. Não use o editor rápido da Cloudflare nem mantenha cópias de código paralelas.
 
 ## Estrutura
-- worker/: Worker Cloudflare, módulo principal e núcleo HTTP.
-- desktop/: aplicativo Windows Electron.
-- android/: aplicativo Android Java/WebView.
+
+- worker/: fonte de verdade do Worker de produção.
+- worker/releases/: snapshots imutáveis de versões já publicadas, usados para auditoria e recuperação.
+- worker/modules/: módulos puros e testáveis, incluindo o catálogo de emblemas.
 - tests/: testes automatizados.
-- docs/: arquitetura, segurança e plano de validação.
-- .github/workflows/: validação e compilação de EXE/APK.
+- docs/: arquitetura, segurança, migrações e procedimentos.
+- desktop/ e android/: clientes nativos que abrem o endereço oficial.
 
-## Estado inicial
-A V4.0.0 faz uma primeira extração modular: index.js reexporta legacy.js e core/http.js contém cinco helpers HTTP/HTML. A maior parte das regras de negócio ainda está em legacy.js. Não é uma modularização completa.
+## Recursos de produção vinculados
 
-Os aplicativos instaláveis são clientes que abrem o sistema web numa janela/tela própria. Precisam de internet e não são aplicativos totalmente offline.
+- D1: fluxo-lab-db.
+- R2: fluxo-lab-downloads, fluxo-lab-importacoes e fluxo-lab-stl.
+- Workers AI: binding AI.
+
+Os identificadores e nomes dos bindings estão declarados em worker/cloudflare.config.ts. Não crie recursos substitutos nem altere esses vínculos sem migração e revisão humana.
 
 ## Testes
-Com Node.js 22 ou superior:
-- node --check worker/index.js
-- node --check worker/legacy.js
-- node --check worker/core/http.js
-- node --test tests/worker-core.test.mjs
 
-## Compilação
-Abra Actions → Build Fluxo Lab installers → Run workflow. Os artefatos são EXE NSIS x64 e APK debug, ambos para homologação. Consulte docs/release-and-security.md antes de distribuir.
+Com Node.js 22.18 ou superior:
 
-Leia CODEX.md antes de qualquer alteração feita por agente de IA.
+- Na pasta worker/: npm install --no-package-lock e npm run check.
+- Na raiz: node --test tests/worker-core.test.mjs.
+- Na raiz: node --test tests/achievements.test.mjs.
+- Na pasta worker/: npm run check:cf valida a configuração com dry-run e não publica.
+
+## Regra de segurança
+
+Nenhuma automação do repositório executa migrações D1, SQL em produção, operações R2 destrutivas ou alterações em dados do laboratório. Migrações continuam sendo procedimentos humanos separados.

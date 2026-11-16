@@ -3,7 +3,18 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "check": "node --check index.js && node --check legacy.js && node --check core/http.js"
+    "dev": "vite dev",
+    "build": "vite build",
+    "check": "node check-syntax.mjs",
+    "check:cf": "cf deploy --mode production --dry-run",
+    "deploy": "cf deploy --mode production"
   },
-  "engines": { "node": ">=22" }
+  "devDependencies": {
+    "@cloudflare/vite-plugin": "2.0.0-beta.v.17",
+    "cf": "1.0.0-beta.31",
+    "vite": "7.3.8"
+  },
+  "engines": {
+    "node": ">=22.18.0"
+  }
 }
