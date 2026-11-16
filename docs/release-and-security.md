@@ -10,10 +10,10 @@
 ## Publicação
 
 1. Alterações do Worker ficam em worker/.
-2. Pull Requests executam validação de sintaxe, configuração Cloudflare e testes.
-3. O merge aprovado em main aciona Cloudflare Workers Builds.
-4. Workers Builds executa npm run check e npm run deploy na pasta worker/.
-5. O comando npm run deploy chama cf deploy --mode production.
+2. GitHub Actions e Cloudflare Workers Builds executam npm run validate:release na pasta worker/.
+3. A validação inclui sintaxe JavaScript, dry-run da configuração Cloudflare e testes de núcleo, emblemas e segurança do pipeline.
+4. O merge aprovado em main aciona o único publicador: Cloudflare Workers Builds.
+5. Após a validação, Workers Builds executa npm run deploy, que chama cf deploy --mode production. GitHub Actions nunca executa o deploy.
 
 Não publique pelo editor rápido da Cloudflare, não envie outra cópia de legacy.js e não atualize o Worker por caminhos paralelos.
 
