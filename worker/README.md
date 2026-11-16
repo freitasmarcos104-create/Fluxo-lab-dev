@@ -11,10 +11,10 @@ Fonte oficial do Worker de produção. O navegador, o aplicativo Windows e o apl
 ## Caminho único de atualização
 
 - Desenvolva em worker/ e abra Pull Request para main.
-- GitHub Actions valida sintaxe, configuração Cloudflare e testes.
-- Depois do merge aprovado em main, o job deploy-production publica esta pasta no Worker fluxo-lab.
+- GitHub Actions valida sintaxe, dry-run Cloudflare e todos os testes, sem publicar em produção.
+- Depois do merge aprovado em main, Cloudflare Workers Builds executa a mesma validação e publica esta pasta no Worker fluxo-lab somente se ela passar.
 - O deploy usa o Cloudflare CLI (cf) e a configuração cloudflare.config.ts.
-- O único segredo exigido pelo pipeline é CLOUDFLARE_API_TOKEN, armazenado nos Actions Secrets do GitHub.
+- A credencial de deploy é gerenciada pelo Cloudflare Workers Builds; GitHub Actions não precisa de CLOUDFLARE_API_TOKEN.
 - Alterações da aplicação web chegam ao Windows e Android sem reconstruir os clientes.
 
 Não edite este Worker pelo editor rápido da Cloudflare e não publique uma cópia paralela. Snapshots históricos estão em releases/.
