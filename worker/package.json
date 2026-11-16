@@ -7,7 +7,9 @@
     "build": "vite build",
     "check": "node check-syntax.mjs",
     "check:cf": "cf deploy --mode production --dry-run",
-    "deploy": "cf deploy --mode production --force"
+    "deploy": "cf deploy --mode production --force",
+    "test": "node --test ../tests/worker-core.test.mjs ../tests/achievements.test.mjs ../tests/deployment-pipeline.test.mjs",
+    "validate:release": "npm run check && npm run check:cf && npm test"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "2.0.0-beta.v.17",

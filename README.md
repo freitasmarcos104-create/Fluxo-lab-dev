@@ -14,12 +14,12 @@ Aplicação central do laboratório. Site, Windows e Android acessam o mesmo Wor
 
 1. Desenvolver a alteração na pasta worker/ em uma branch.
 2. Abrir Pull Request para main.
-3. O GitHub Actions valida sintaxe, configuração Cloudflare e testes automatizados.
-4. Depois do merge aprovado em main e da validação bem-sucedida, o próprio GitHub Actions publica o Worker fluxo-lab.
-5. O deploy usa worker/cloudflare.config.ts, preservando o Worker, D1, buckets R2 e domínio oficiais.
+3. O GitHub Actions executa a validação completa em Pull Requests e pushes: sintaxe, dry-run do Cloudflare e as três suítes de testes.
+4. Após o merge em main, o Cloudflare Workers Builds executa exatamente o mesmo comando de validação e, somente se tudo passar, publica o Worker fluxo-lab.
+5. O deploy usa worker/cloudflare.config.ts, preservando o Worker, D1, buckets R2 e domínio oficiais. GitHub Actions não publica em produção, evitando duas versões para o mesmo commit.
 6. Alterações de telas, regras e funcionalidades web chegam aos clientes Windows e Android sem reconstruir EXE ou APK.
 
-O segredo CLOUDFLARE_API_TOKEN deve existir em Settings > Secrets and variables > Actions. Ele é usado somente pelo job de publicação. O identificador da conta está declarado no workflow.
+O token de publicação fica sob controle do Cloudflare Workers Builds. O GitHub Actions não precisa de CLOUDFLARE_API_TOKEN nem de permissão para alterar produção.
 
 ## Estrutura
 
@@ -48,7 +48,5 @@ Os identificadores e nomes dos bindings estão declarados em worker/cloudflare.c
 
 Com Node.js 22.18 ou superior:
 
-- Na pasta worker/: npm install --no-package-lock e npm run check.
-- Na raiz: node --test tests/worker-core.test.mjs.
-- Na raiz: node --test tests/achievements.test.mjs.
-- Na pasta worker/: npm run check:cf valida a configuração com dry-run e não publica.
+- Na pasta worker/: npm install --no-package-lock e npm run validate:release.
+- O comando reúne sintaxe, dry-run Cloudflare e testes de núcleo, emblemas e segurança do pipeline.
