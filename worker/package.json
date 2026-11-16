@@ -7,7 +7,7 @@
     "build": "vite build",
     "check": "node check-syntax.mjs",
     "check:cf": "cf deploy --mode production --dry-run",
-    "deploy": "cf d1 migrations apply 1806ff34-36f6-4cfc-a6df-aa2f5e04b6c6 --dir migrations && cf deploy --mode production --force"
+    "deploy": "cf deploy --mode production --force"
   },
   "devDependencies": {
     "@cloudflare/vite-plugin": "2.0.0-beta.v.17",

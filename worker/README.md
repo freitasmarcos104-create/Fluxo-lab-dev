@@ -11,14 +11,19 @@ Fonte oficial do Worker de produção. O navegador, o aplicativo Windows e o apl
 ## Caminho único de atualização
 
 - Desenvolva em worker/ e abra Pull Request para main.
-- GitHub Actions valida sintaxe, configuração e testes.
-- Cloudflare Workers Builds acompanha main, usa esta pasta como root directory e publica o Worker após merge aprovado.
-- O build usa Vite Plugin v2 e o comando de publicação é cf deploy --mode production --force.
-- O --force é necessário porque o Worker foi originalmente publicado pela Script API; ele permite que a fonte versionada do repositório assuma o lugar do código manual/anterior.
-- A configuração do Worker está em cloudflare.config.ts; a configuração do build Vite está em vite.config.ts.
+- GitHub Actions valida sintaxe, configuração Cloudflare e testes.
+- Depois do merge aprovado em main, o job deploy-production publica esta pasta no Worker fluxo-lab.
+- O deploy usa o Cloudflare CLI (cf) e a configuração cloudflare.config.ts.
+- O único segredo exigido pelo pipeline é CLOUDFLARE_API_TOKEN, armazenado nos Actions Secrets do GitHub.
 - Alterações da aplicação web chegam ao Windows e Android sem reconstruir os clientes.
 
 Não edite este Worker pelo editor rápido da Cloudflare e não publique uma cópia paralela. Snapshots históricos estão em releases/.
+
+## Publicação e migrações
+
+- `npm run deploy` executa somente `cf deploy --mode production --force`.
+- O deploy não executa migrações D1, SQL em produção ou operações destrutivas R2.
+- Migrações são etapas manuais e independentes, com revisão própria.
 
 ## Bindings de produção
 
@@ -28,4 +33,4 @@ Não edite este Worker pelo editor rápido da Cloudflare e não publique uma có
 - IMPORT_BUCKET: R2 fluxo-lab-importacoes.
 - STL_BUCKET: R2 fluxo-lab-stl.
 
-Não alterar os bindings nem criar recursos substitutos sem revisão humana. O pipeline não executa migrações D1, SQL em produção ou operações destrutivas R2.
+Não alterar os bindings nem criar recursos substitutos sem revisão humana.
