@@ -36,6 +36,8 @@ jobs:
         run: node --test tests/worker-core.test.mjs
       - name: Run achievements tests
         run: node --test tests/achievements.test.mjs
+      - name: Validate deployment safety contract
+        run: node --test tests/deployment-pipeline.test.mjs
 
   deploy-production:
     name: Publicar Worker oficial em produção
