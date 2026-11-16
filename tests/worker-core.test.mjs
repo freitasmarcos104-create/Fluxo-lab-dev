@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import {
   cabecalhosSegurancaV30,
   htmlResponse,
@@ -46,4 +47,21 @@ test('headers de segurança incluem no-sniff e política de frame', () => {
   assert.equal(headers['x-content-type-options'], 'nosniff');
   assert.equal(headers['x-frame-options'], 'DENY');
   assert.equal(headers['x-robots-tag'], 'noindex, nofollow, noarchive');
+});
+
+
+test('ficha de produção usa o renderizador de etapa existente', async () => {
+  const source = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
+  const inicio = source.indexOf('function cardEtapaFichaV3417(');
+  const fim = source.indexOf('\\nfunction blocoArcada(', inicio);
+  assert.ok(inicio >= 0 && fim > inicio, 'função de renderização da ficha deve existir');
+  const helper = source.slice(inicio, fim);
+  assert.match(helper, /const html = cardEtapaBaseV336\\(usuario, etapa\\);/);
+  assert.doesNotMatch(helper, /cardEtapa\\(usuario, etapa\\)/);
+});
+
+test('pacotes excluídos não aparecem nas listagens digitais', async () => {
+  const source = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
+  assert.match(source, /WHERE p\\.trabalho_id=\\?\\s+AND p\\.status!='EXCLUIDO'/);
+  assert.match(source, /WHERE p\\.status!='EXCLUIDO'\\s+AND\\s+\\(/);
 });

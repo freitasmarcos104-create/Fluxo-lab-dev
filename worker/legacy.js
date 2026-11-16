@@ -9250,7 +9250,7 @@ function cardEtapaFichaV3417(
   etapa,
   responsaveisProjetos = []
 ) {
-  const html = cardEtapa(usuario, etapa);
+  const html = cardEtapaBaseV336(usuario, etapa);
   const extras = [
     formularioResponsavelProjetoConcluidoV3417(
       usuario,
@@ -19588,6 +19588,7 @@ async function listarPacotesTrabalhoV321(env, trabalhoId, usuarioId) {
     FROM pacotes_arquivos_digitais p
     LEFT JOIN usuarios u ON u.id=p.criado_por
     WHERE p.trabalho_id=?
+      AND p.status!='EXCLUIDO'
     ORDER BY p.id DESC
   `).bind(usuarioId, trabalhoId).all();
   return r.results || [];
@@ -19607,7 +19608,8 @@ async function listarPacotesVisiveisV321(env, usuario) {
     FROM pacotes_arquivos_digitais p
     LEFT JOIN trabalhos t ON t.id=p.trabalho_id
     LEFT JOIN usuarios u ON u.id=p.criado_por
-    WHERE (
+    WHERE p.status!='EXCLUIDO'
+      AND (
       p.trabalho_id IS NULL
       OR (
         t.id IS NOT NULL
