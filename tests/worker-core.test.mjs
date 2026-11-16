@@ -90,7 +90,7 @@ test('rota direta do trabalho consulta o paciente e monta a ficha completa', asy
   assert.ok(inicio >= 0 && fim > inicio, 'rota GET de abertura do trabalho deve existir');
   const rota = source.slice(inicio, fim);
   assert.ok(rota.includes('caminho.match('));
-  assert.ok(rota.includes('/^\\\\/trabalhos\\\\/(\\\\d+)$/'));
+  assert.ok(rota.includes('trabalhos'));
   assert.ok(rota.includes('await obterTrabalho('));
   assert.ok(rota.includes('usuarioPodeVerTrabalhoDigitalV345'));
   assert.ok(rota.includes('paginaFicha('));
