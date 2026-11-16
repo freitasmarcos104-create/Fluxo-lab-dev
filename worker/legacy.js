@@ -9331,7 +9331,7 @@ ${
   componentes
     .map(
       componente =>
-        cardComponente(
+        cardComponenteBaseV336(
           usuario,
           componente
         )
