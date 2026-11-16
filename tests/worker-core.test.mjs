@@ -89,10 +89,11 @@ test('rota direta do trabalho consulta o paciente e monta a ficha completa', asy
   const fim = source.indexOf('/* CHAT */', inicio);
   assert.ok(inicio >= 0 && fim > inicio, 'rota GET de abertura do trabalho deve existir');
   const rota = source.slice(inicio, fim);
-  assert.match(rota, /caminho\\.match\\([\\s\\S]*?trabalhos/);
-  assert.match(rota, /await obterTrabalho\\(/);
-  assert.match(rota, /usuarioPodeVerTrabalhoDigitalV345/);
-  assert.match(rota, /paginaFicha\\(/);
-  assert.match(rota, /await listarEtapas\\(/);
-  assert.match(rota, /await listarComponentes\\(/);
+  assert.ok(rota.includes('caminho.match('));
+  assert.ok(rota.includes('/^\\\\/trabalhos\\\\/(\\\\d+)$/'));
+  assert.ok(rota.includes('await obterTrabalho('));
+  assert.ok(rota.includes('usuarioPodeVerTrabalhoDigitalV345'));
+  assert.ok(rota.includes('paginaFicha('));
+  assert.ok(rota.includes('await listarEtapas('));
+  assert.ok(rota.includes('await listarComponentes('));
 });
