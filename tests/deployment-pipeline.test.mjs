@@ -27,3 +27,13 @@ test('pull requests validam, mas não publicam em produção', () => {
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /github\.event_name != 'pull_request'/);
 });
+
+const installers = await readFile(
+  new URL('../.github/workflows/build-installers.yml', import.meta.url),
+  'utf8'
+);
+
+test('assinatura do APK usa o segredo correto para a senha da chave privada', () => {
+  assert.ok(installers.includes("ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}"));
+  assert.ok(!installers.includes("ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}"));
+});
