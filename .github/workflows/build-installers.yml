@@ -7,6 +7,7 @@ on:
     paths:
       - 'desktop/**'
       - 'android/**'
+      - '.github/workflows/build-installers.yml'
 
 permissions:
   contents: read
@@ -63,9 +64,8 @@ jobs:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
           KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" && -n "$KEY_PASSWORD" ]]; then
+          if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" ]]; then
             echo "available=true" >> "$GITHUB_OUTPUT"
           else
             echo "available=false" >> "$GITHUB_OUTPUT"
@@ -84,7 +84,8 @@ jobs:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           # PKCS12 usa a mesma senha para o arquivo e para a chave privada.
-          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+          # O formato PKCS12 usa a mesma senha para o arquivo e para a chave privada.
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: gradle --no-daemon assembleRelease
         working-directory: android
       - name: Upload signed Android APK
@@ -97,4 +98,4 @@ jobs:
           retention-days: 30
       - name: Report missing Android signing setup
         if: steps.signing.outputs.available != 'true'
-        run: echo "Configure os quatro segredos do Android no GitHub para gerar o APK assinado."
+        run: echo "Configure os três segredos do Android no GitHub para gerar o APK assinado."
