@@ -71,3 +71,28 @@ test('pacotes excluídos não aparecem nas listagens digitais', async () => {
   assert.ok(porTrabalho.includes("AND p.status!='EXCLUIDO'"));
   assert.ok(visiveis.includes("WHERE p.status!='EXCLUIDO'"));
 });
+
+
+test('ficha do paciente renderiza componentes com a função existente', async () => {
+  const source = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
+  const inicio = source.indexOf('function blocoArcada(');
+  const fim = source.indexOf('function blocoRetrabalhosBaseV336(', inicio);
+  assert.ok(inicio >= 0 && fim > inicio, 'bloco de arcada deve existir');
+  const bloco = source.slice(inicio, fim);
+  assert.ok(bloco.includes('cardComponenteBaseV336('));
+  assert.ok(!bloco.includes('cardComponente('));
+});
+
+test('rota direta do trabalho consulta o paciente e monta a ficha completa', async () => {
+  const source = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
+  const inicio = source.indexOf('/* ABRIR TRABALHO */');
+  const fim = source.indexOf('/* CHAT */', inicio);
+  assert.ok(inicio >= 0 && fim > inicio, 'rota GET de abertura do trabalho deve existir');
+  const rota = source.slice(inicio, fim);
+  assert.match(rota, /caminho\\.match\\([\\s\\S]*?trabalhos/);
+  assert.match(rota, /await obterTrabalho\\(/);
+  assert.match(rota, /usuarioPodeVerTrabalhoDigitalV345/);
+  assert.match(rota, /paginaFicha\\(/);
+  assert.match(rota, /await listarEtapas\\(/);
+  assert.match(rota, /await listarComponentes\\(/);
+});
