@@ -2,7 +2,7 @@ import { bindings, defineConfig } from "cf/config";
 import * as entrypoint from "./index.js" with { type: "cf-worker" };
 
 // Configuração tipada do único Worker oficial do Fluxo Lab.
-// Os nomes e IDs abaixo espelham os bindings já existentes em produção.
+// Os nomes e IDs abaixo espelham os bindings e opções já existentes em produção.
 export default defineConfig({
   accountId: "72bf422494f3d27c3561ba87daa5bd7b",
   worker: {
@@ -11,9 +11,12 @@ export default defineConfig({
     compatibilityDate: "2026-09-11",
     compatibilityFlags: [],
     workersDev: true,
+    previewUrls: false,
+    logpush: false,
     observability: {
       enabled: true,
       headSamplingRate: 1,
+      redactQueryString: false,
       logs: {
         enabled: true,
         headSamplingRate: 1,
