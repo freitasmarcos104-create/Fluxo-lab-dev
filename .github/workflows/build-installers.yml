@@ -7,7 +7,6 @@ on:
     paths:
       - 'desktop/**'
       - 'android/**'
-      - '.github/workflows/build-installers.yml'
 
 permissions:
   contents: read
@@ -30,46 +29,6 @@ jobs:
       - name: Build Windows installer
         run: npm run dist:win
         working-directory: desktop
-      - name: Publish Windows installer to official R2
-
-        shell: bash
-        env:
-          PUBLISH_COMMIT: 4fd5d51aa737a7a791d37562a571b33ae7564d74
-          PUBLISH_BASE: https://fluxo-lab-upload-once-20261115.trainingmav.workers.dev
-        run: |
-          EXE="$(find desktop/dist -maxdepth 1 -name '*.exe' -print -quit)"
-          test -n "$EXE"
-          node --input-type=module - "$EXE" <<'NODE'
-          import fs from 'node:fs';
-          const [file] = process.argv.slice(2);
-          const base = process.env.PUBLISH_BASE;
-          const headers = { 'X-Workflow-Commit': process.env.PUBLISH_COMMIT };
-          async function call(path, options={}) {
-            const response = await fetch(base + path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
-            const data = await response.json();
-            if (!response.ok) throw new Error(JSON.stringify(data));
-            return data;
-          }
-          const { uploadId } = await call('/begin?kind=windows', { method: 'POST' });
-          const parts = [];
-          let partNumber = 1;
-          try {
-            for await (const chunk of fs.createReadStream(file, { highWaterMark: 8 * 1024 * 1024 })) {
-              const part = await call(`/part?kind=windows&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`, {
-                method: 'PUT', body: chunk, headers: { 'Content-Type': 'application/octet-stream' }
-              });
-              parts.push({ partNumber, etag: part.etag });
-              partNumber++;
-            }
-            const result = await call(`/finish?kind=windows&uploadId=${encodeURIComponent(uploadId)}`, {
-              method: 'POST', body: JSON.stringify(parts), headers: { 'Content-Type': 'application/json' }
-            });
-            process.stdout.write(JSON.stringify(result) + '\\n');
-          } catch (error) {
-            try { await call(`/abort?kind=windows&uploadId=${encodeURIComponent(uploadId)}`, { method: 'POST' }); } catch {}
-            throw error;
-          }
-          NODE
       - name: Upload Windows installer
         uses: actions/upload-artifact@v7
         with:
@@ -128,45 +87,6 @@ jobs:
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
         run: gradle --no-daemon assembleRelease
         working-directory: android
-      - name: Publish signed Android APK to official R2
-
-        if: steps.signing.outputs.available == 'true'
-        shell: bash
-        env:
-          PUBLISH_COMMIT: 4fd5d51aa737a7a791d37562a571b33ae7564d74
-          PUBLISH_BASE: https://fluxo-lab-upload-once-20261115.trainingmav.workers.dev
-        run: |
-          node --input-type=module - android/app/build/outputs/apk/release/app-release.apk <<'NODE'
-          import fs from 'node:fs';
-          const [file] = process.argv.slice(2);
-          const base = process.env.PUBLISH_BASE;
-          const headers = { 'X-Workflow-Commit': process.env.PUBLISH_COMMIT };
-          async function call(path, options={}) {
-            const response = await fetch(base + path, { ...options, headers: { ...headers, ...(options.headers || {}) } });
-            const data = await response.json();
-            if (!response.ok) throw new Error(JSON.stringify(data));
-            return data;
-          }
-          const { uploadId } = await call('/begin?kind=android', { method: 'POST' });
-          const parts = [];
-          let partNumber = 1;
-          try {
-            for await (const chunk of fs.createReadStream(file, { highWaterMark: 8 * 1024 * 1024 })) {
-              const part = await call(`/part?kind=android&uploadId=${encodeURIComponent(uploadId)}&partNumber=${partNumber}`, {
-                method: 'PUT', body: chunk, headers: { 'Content-Type': 'application/vnd.android.package-archive' }
-              });
-              parts.push({ partNumber, etag: part.etag });
-              partNumber++;
-            }
-            const result = await call(`/finish?kind=android&uploadId=${encodeURIComponent(uploadId)}`, {
-              method: 'POST', body: JSON.stringify(parts), headers: { 'Content-Type': 'application/json' }
-            });
-            process.stdout.write(JSON.stringify(result) + '\\n');
-          } catch (error) {
-            try { await call(`/abort?kind=android&uploadId=${encodeURIComponent(uploadId)}`, { method: 'POST' }); } catch {}
-            throw error;
-          }
-          NODE
       - name: Upload signed Android APK
         if: steps.signing.outputs.available == 'true'
         uses: actions/upload-artifact@v7
