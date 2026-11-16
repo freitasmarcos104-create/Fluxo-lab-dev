@@ -19605,10 +19605,15 @@ async function listarPacotesVisiveisV321(env, usuario) {
       (SELECT COUNT(*) FROM downloads_pacotes_digitais d WHERE d.pacote_id=p.id AND d.tipo_download='PACOTE_COMPLETO') AS downloads_completos,
       (SELECT COUNT(*) FROM downloads_pacotes_digitais d WHERE d.pacote_id=p.id AND d.usuario_id=? AND d.tipo_download='PACOTE_COMPLETO') AS meus_downloads
     FROM pacotes_arquivos_digitais p
-    INNER JOIN trabalhos t ON t.id=p.trabalho_id
+    LEFT JOIN trabalhos t ON t.id=p.trabalho_id
     LEFT JOIN usuarios u ON u.id=p.criado_por
-    WHERE 1=1
-      ${sqlVisibilidadeTrabalhoDigitalLiteralV345(usuario, "t")}
+    WHERE (
+      p.trabalho_id IS NULL
+      OR (
+        t.id IS NOT NULL
+        ${sqlVisibilidadeTrabalhoDigitalLiteralV345(usuario, "t")}
+      )
+    )
     ORDER BY CASE p.status WHEN 'ATIVO' THEN 1 WHEN 'CANCELADO' THEN 2 ELSE 3 END,p.id DESC
     LIMIT 500
   `).bind(usuario.id).all();
@@ -19794,7 +19799,21 @@ function paginaCaixaArquivosV321(usuario, pacotes, mensagem = "", tipo = "sucess
   const linhas = pacotes.map(p => {
     const pronto = p.status === "ATIVO" && Number(p.pendentes||0)===0;
     const destinoMeu = setoresDigitaisUsuarioV321(usuario).includes(String(p.setor_destino));
-    return `<tr><td><a href="/trabalhos/${p.trabalho_id}/pacotes"><strong>${escapeHtml(p.paciente)}</strong></a><div class="mini">${escapeHtml(p.codigo)} · ${escapeHtml(p.municipio)}</div></td><td>${escapeHtml(p.nome_pacote)}<div class="mini">${escapeHtml(nomeSetorPacoteV321(p.setor_origem))} → ${escapeHtml(nomeSetorPacoteV321(p.setor_destino))}</div></td><td>${Number(p.total_arquivos||0)}<div class="mini">${escapeHtml(formatarBytesV32(p.tamanho_total_bytes))}</div></td><td>${escapeHtml(p.criado_por_nome||"—")}<div class="mini">${escapeHtml(formatarData(p.criado_em))}</div></td><td>${p.status!=="ATIVO"?`<span class="badge neutro">${escapeHtml(p.status)}</span>`:Number(p.pendentes||0)?`<span class="badge alerta">Upload incompleto</span>`:`<span class="badge ok">Pronto</span>`}${destinoMeu?`<div class="mini">${Number(p.meus_downloads||0)>0?"Você já baixou":"Destinado ao seu setor"}</div>`:""}</td><td>${pronto?`<a class="botao botao-sec" href="/pacotes/${p.id}/download">Baixar pasta</a>`:""}</td></tr>`;
+    const semCadastro = !Number(p.trabalho_id || 0);
+    const observacao = String(p.observacao || "");
+    const prefixoPacienteLivre = "Paciente (sem cadastro):";
+    const nomeLivre = semCadastro
+      ? (observacao.includes(prefixoPacienteLivre)
+          ? observacao.slice(observacao.indexOf(prefixoPacienteLivre) + prefixoPacienteLivre.length).split(" · ")[0].trim() || "Sem cadastro"
+          : "Sem cadastro")
+      : "";
+    const paciente = semCadastro
+      ? `<strong>${escapeHtml(nomeLivre)}</strong>`
+      : `<a href="/trabalhos/${Number(p.trabalho_id)}/pacotes"><strong>${escapeHtml(p.paciente)}</strong></a>`;
+    const referencia = semCadastro
+      ? "Paciente sem cadastro"
+      : `${escapeHtml(p.codigo || "")} · ${escapeHtml(p.municipio || "")}`;
+    return `<tr><td>${paciente}<div class="mini">${referencia}</div></td><td>${escapeHtml(p.nome_pacote)}<div class="mini">${escapeHtml(nomeSetorPacoteV321(p.setor_origem))} → ${escapeHtml(nomeSetorPacoteV321(p.setor_destino))}</div></td><td>${Number(p.total_arquivos||0)}<div class="mini">${escapeHtml(formatarBytesV32(p.tamanho_total_bytes))}</div></td><td>${escapeHtml(p.criado_por_nome||"—")}<div class="mini">${escapeHtml(formatarData(p.criado_em))}</div></td><td>${p.status!=="ATIVO"?`<span class="badge neutro">${escapeHtml(p.status)}</span>`:Number(p.pendentes||0)?`<span class="badge alerta">Upload incompleto</span>`:`<span class="badge ok">Pronto</span>`}${destinoMeu?`<div class="mini">${Number(p.meus_downloads||0)>0?"Você já baixou":"Destinado ao seu setor"}</div>`:""}</td><td>${pronto?`<a class="botao botao-sec" href="/pacotes/${p.id}/download">Baixar pasta</a>`:""}</td></tr>`;
   }).join("");
   return layout(`<div class="cabecalho-pagina"><div><h2>Caixa de arquivos Digital</h2><p class="nota">Pacotes entre CAD/CAM, Fatiamento e gestão. Os mais recentes aparecem primeiro. Todo mundo da área Digital pode enviar e baixar.</p></div><a class="botao botao-sec" href="/digital">← Digital</a></div>${mensagem?`<div class="${tipo}">${escapeHtml(mensagem)}</div>`:""}${avisoPrioridade}${formularioEnvio}<div class="tabela-wrap"><table><thead><tr><th>Paciente</th><th>Pacote / fluxo</th><th>Arquivos</th><th>Enviado por</th><th>Status</th><th></th></tr></thead><tbody>${linhas||`<tr><td colspan="6">Nenhum pacote visível para seu setor.</td></tr>`}</tbody></table></div>${listaEntregasV315(arquivosSoltos, "/arquivos-digitais")}`,"Caixa de arquivos",usuario);
 }
