@@ -26,8 +26,13 @@ export async function handleDigitalPackageRoutesV49(request, env, url, caminho, 
     let trabalhoId=Number(body?.trabalho_id||0);
     const pacienteLivre=String(body?.paciente_livre||"").trim().slice(0,120);
     if(vinculado&&!(Number.isSafeInteger(trabalhoId)&&trabalhoId>0)&&!pacienteLivre) return jsonResponseV32({mensagem:"Busque e escolha o paciente, ou escreva o nome do paciente sem cadastro."},400);
-    if(Number.isSafeInteger(trabalhoId)&&trabalhoId>0){ const t=await obterTrabalho(env,trabalhoId); if(!t||Number(t.excluido||0)) return jsonResponseV32({mensagem:"Paciente não encontrado."},404); }
-    else trabalhoId=0;
+    if(Number.isSafeInteger(trabalhoId)&&trabalhoId>0){
+      const t=await obterTrabalho(env,trabalhoId);
+      if(!t||Number(t.excluido||0)) return jsonResponseV32({mensagem:"Paciente não encontrado."},404);
+      if(Number(t.entregue||0)===1) return jsonResponseV32({
+        mensagem:"Este trabalho já foi entregue. Novos pacotes de arquivos estão bloqueados para ele. Nenhum pacote ou espaço foi reservado."
+      },409);
+    } else trabalhoId=0;
     const recebidos=Array.isArray(body?.arquivos)?body.arquivos:[];
     if(!recebidos.length) return jsonResponseV32({mensagem:"Nenhum arquivo recebido."},400);
     const observacao=String(body?.observacao||"").trim().slice(0,500)||null;
