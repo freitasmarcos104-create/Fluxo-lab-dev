@@ -22953,9 +22953,16 @@ async function rotearV31Base(request, env, url, caminho) {
     const agora = new Date().toISOString();
 
     try {
-      await env.IMPORT_BUCKET.put(chave, arquivo.stream(), {
+      const objeto = await env.IMPORT_BUCKET.put(chave, arquivo.stream(), {
         httpMetadata: { contentType: mime }
       });
+      const tamanhoGravado = Number(objeto?.size ?? 0);
+      if (!Number.isSafeInteger(tamanhoGravado) || tamanhoGravado !== tamanho) {
+        try { await env.IMPORT_BUCKET.delete(chave); } catch (_) { }
+        return jsonResponseV32({
+          mensagem: "Upload incompleto: o tamanho armazenado no R2 não corresponde ao arquivo original. O arquivo foi removido; tente novamente."
+        }, 400);
+      }
 
       let inserido;
       try {

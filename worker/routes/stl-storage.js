@@ -50,7 +50,7 @@ export async function handleStlStorageRoutesV49(request, env, url, caminho, meto
     if (!arcadas.includes(arcada) || !categorias.includes(categoria)) return jsonResponseV32({ mensagem: "Arcada ou categoria inválida." }, 400);
 
     const resumoAntes = await resumoArmazenamentoStlV32(env);
-    if (!Number.isFinite(tamanhoInformado) || tamanhoInformado <= 0 || tamanhoInformado > resumoAntes.limite_arquivo_bytes) {
+    if (!Number.isSafeInteger(tamanhoInformado) || tamanhoInformado <= 0 || tamanhoInformado > resumoAntes.limite_arquivo_bytes) {
       return jsonResponseV32({ mensagem: `Arquivo inválido ou maior que ${formatarBytesV32(resumoAntes.limite_arquivo_bytes)}.` }, 413);
     }
     if (resumoAntes.usado_bytes >= resumoAntes.limite_bytes || resumoAntes.usado_bytes + tamanhoInformado > resumoAntes.limite_bytes) {
@@ -65,7 +65,11 @@ export async function handleStlStorageRoutesV49(request, env, url, caminho, meto
         httpMetadata: { contentType: "model/stl" },
         customMetadata: { trabalhoId: String(trabalhoId), enviadoPor: String(usuario.id) }
       });
-      const tamanhoReal = Number(objeto?.size || tamanhoInformado);
+      const tamanhoReal = Number(objeto?.size ?? 0);
+      if (!Number.isSafeInteger(tamanhoReal) || tamanhoReal !== tamanhoInformado) {
+        await env.STL_BUCKET.delete(chave);
+        return jsonResponseV32({ mensagem: "Upload incompleto: o tamanho gravado no R2 não corresponde ao arquivo original. O arquivo foi removido; tente novamente." }, 400);
+      }
       if (tamanhoReal <= 0 || tamanhoReal > resumoAntes.limite_arquivo_bytes || resumoAntes.usado_bytes + tamanhoReal > resumoAntes.limite_bytes) {
         await env.STL_BUCKET.delete(chave);
         return jsonResponseV32({ mensagem: "Upload cancelado após validação do tamanho real do arquivo." }, 409);
