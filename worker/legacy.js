@@ -18516,24 +18516,48 @@ function formularioEnvioV315(usuario, trabalhos, voltar){
     async function enviarArquivo(a,base,caminho,pacoteIdLocal,aoAndar){
       const tamanho=Number(a.size||0);
       const pedaco=8*1024*1024;
-      // V3.17.1: todo arquivo usa o envio em partes (a rota /upload para arquivos pequenos nunca existiu).
+      let uploadId="";
+      if(!Number.isSafeInteger(tamanho)||tamanho<=0) throw new Error('Tamanho inválido para '+String(a.name||'arquivo')+'.');
       if(atual)atual.textContent=a.name+' — '+emMB(tamanho);
-      const rc=await fetch('/pacotes/'+pacoteIdLocal+'/arquivos/'+base.id+'/mpu/criar',{method:'POST',headers:{'x-fluxolab':'1'}});
-      const dados=await rc.json();
-      const uploadId=dados.uploadId;
-      const parts=[];
-      let parte=1,enviado=0;
-      for(let p=0;p<tamanho;p+=pedaco){
-        const blob=a.slice(p,Math.min(p+pedaco,tamanho));
-        const rp=await fetch('/pacotes/'+pacoteIdLocal+'/arquivos/'+base.id+'/mpu/parte?uploadId='+encodeURIComponent(uploadId)+'&partNumber='+parte,{method:'POST',headers:{'Content-Type':'application/octet-stream','x-fluxolab':'1'},body:blob});
-        const dp=await rp.json();
-        parts.push({partNumber:parte,etag:dp.etag});
-        enviado+=blob.size;
-        if(aoAndar)aoAndar(enviado,false);
-        parte++;
+      try{
+        const rc=await fetch('/pacotes/'+pacoteIdLocal+'/arquivos/'+base.id+'/mpu/criar',{method:'POST',headers:{'x-fluxolab':'1'}});
+        const dados=await rc.json().catch(()=>({}));
+        if(!rc.ok||!dados.uploadId) throw new Error(dados.mensagem||'Falha ao iniciar o upload de '+a.name+'.');
+        uploadId=String(dados.uploadId);
+        const parts=[];
+        let parte=1,enviado=0;
+        for(let p=0;p<tamanho;p+=pedaco){
+          const blob=a.slice(p,Math.min(p+pedaco,tamanho));
+          const urlParte='/pacotes/'+pacoteIdLocal+'/arquivos/'+base.id+'/mpu/parte?uploadId='+encodeURIComponent(uploadId)+'&partNumber='+parte;
+          let dp=null,erroParte=null;
+          for(let tentativa=1;tentativa<=3;tentativa++){
+            try{
+              const rp=await fetch(urlParte,{method:'POST',headers:{'Content-Type':'application/octet-stream','x-fluxolab':'1'},body:blob});
+              dp=await rp.json().catch(()=>({}));
+              if(rp.ok&&Number(dp.partNumber)===parte&&String(dp.etag||'').trim()){erroParte=null;break;}
+              erroParte=new Error(dp.mensagem||'Falha no envio da parte '+parte+' de '+a.name+'.');
+              if(rp.status>=400&&rp.status<500&&rp.status!==408&&rp.status!==429) break;
+            }catch(erro){erroParte=erro;}
+            if(tentativa<3) await new Promise(resolve=>setTimeout(resolve,500*tentativa));
+          }
+          if(erroParte) throw erroParte;
+          parts.push({partNumber:Number(dp.partNumber),etag:String(dp.etag)});
+          enviado+=blob.size;
+          if(aoAndar)aoAndar(enviado,false);
+          parte++;
+        }
+        if(parts.length!==Math.ceil(tamanho/pedaco)) throw new Error('O envio de '+a.name+' terminou com partes ausentes.');
+        if(atual)atual.textContent='Juntando as partes no servidor… ('+a.name+')';
+        const rf=await fetch('/pacotes/'+pacoteIdLocal+'/arquivos/'+base.id+'/mpu/concluir?uploadId='+encodeURIComponent(uploadId),{method:'POST',headers:{'Content-Type':'application/json','x-fluxolab':'1'},body:JSON.stringify({parts})});
+        const df=await rf.json().catch(()=>({}));
+        if(!rf.ok||!String(df.mensagem||'').trim()) throw new Error(df.mensagem||'O servidor não confirmou a conclusão de '+a.name+'.');
+        uploadId="";
+      }catch(erro){
+        if(uploadId){
+          try{await fetch('/pacotes/'+pacoteIdLocal+'/arquivos/'+base.id+'/mpu/abortar?uploadId='+encodeURIComponent(uploadId),{method:'POST',headers:{'x-fluxolab':'1'}});}catch(_){ }
+        }
+        throw erro;
       }
-      if(atual)atual.textContent='Juntando as partes no servidor… ('+a.name+')';
-      await fetch('/pacotes/'+pacoteIdLocal+'/arquivos/'+base.id+'/mpu/concluir?uploadId='+encodeURIComponent(uploadId),{method:'POST',headers:{'Content-Type':'application/json','x-fluxolab':'1'},body:JSON.stringify({parts})});
     }
     botao.addEventListener('click',async()=>{
       const lista=juntarDaPasta();
