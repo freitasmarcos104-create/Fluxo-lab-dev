@@ -30,9 +30,9 @@ Os cinco bindings estão declarados em worker/cloudflare.config.ts. O Worker man
 
 ## Publicação de versão
 
-O Cloudflare Workers Builds acompanha a branch main do repositório freitasmarcos104-create/Fluxo-lab-dev, com root directory /worker, build command npm run check, deploy command npm run deploy e sem Preview deployments. Os caminhos worker/** iniciam builds. O deploy é feito pelo Cloudflare CLI cf usando a configuração tipada worker/cloudflare.config.ts.
+O Cloudflare Workers Builds acompanha a branch main do repositório freitasmarcos104-create/Fluxo-lab-dev, com root directory /worker, build command npm run validate:release, deploy command npm run deploy e sem Preview deployments. Os caminhos worker/** iniciam builds. A validação inclui sintaxe, dry-run Cloudflare e todas as suítes de testes; só depois o Cloudflare CLI publica usando worker/cloudflare.config.ts.
 
-GitHub Actions valida sintaxe e testes em Pull Requests. O merge aprovado em main é o único evento que publica uma atualização do Worker. O sistema web e os clientes Windows/Android passam a acessar automaticamente a mesma versão publicada.
+GitHub Actions executa a mesma validação em Pull Requests e pushes, mas não publica em produção. O Cloudflare Workers Builds é o único publicador. Assim, cada commit aprovado gera no máximo uma publicação oficial, e o sistema web e os clientes Windows/Android acessam a mesma versão publicada.
 
 ## Segurança e limites
 
