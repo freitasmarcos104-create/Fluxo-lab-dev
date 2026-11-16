@@ -13,7 +13,8 @@ Fonte oficial do Worker de produção. O navegador, o aplicativo Windows e o apl
 - Desenvolva em worker/ e abra Pull Request para main.
 - GitHub Actions valida sintaxe, configuração e testes.
 - Cloudflare Workers Builds acompanha main, usa esta pasta como root directory e publica o Worker após merge aprovado.
-- O deploy executa npm run check e npm run deploy; o segundo chama cf deploy --mode production.
+- O build usa Vite Plugin v2 e o comando de publicação é cf deploy --mode production.
+- A configuração de Worker está em cloudflare.config.ts; a configuração do build Vite está em vite.config.ts.
 - Alterações da aplicação web chegam ao Windows e Android sem reconstruir os clientes.
 
 Não edite este Worker pelo editor rápido da Cloudflare e não publique uma cópia paralela. Snapshots históricos estão em releases/.
