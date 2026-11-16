@@ -197,7 +197,7 @@ import {
 // FLUXO LAB V3.4.4 — ESTABILIDADE GERAL
 // Correções de integridade, concorrência, relatórios, fechamento, remessas e arquivos.
 // V3.17.1: correção do envio de arquivos, das resinas e da rota /materiais.
-const VERSAO_FLUXO_LAB = "5.8.7";
+const VERSAO_FLUXO_LAB = "5.8.8";
 const NOME_VERSAO_FLUXO_LAB = "Downloads oficiais Windows e Android";
 // A partir da V3.11.0 o número da versão aparece na tela lendo esta constante.
 // Para subir de versão, mude só o texto entre as aspas da linha acima.
@@ -21694,7 +21694,7 @@ async function universidadeEmitirSeElegivelV321(env, cursoId, matriculaId, usuar
     const tentativa=await env.db.prepare(`SELECT aprovou FROM universidade_tentativas_v321 WHERE matricula_id=? ORDER BY id DESC LIMIT 1`).bind(matriculaId).first();
     if(!tentativa || !Number(tentativa.aprovou)) return false;
   }
-      const codigo="const FLUXO_CACHE='fluxo-lab-v5.8.7';\nself.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\nself.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});\nself.addEventListener('fetch',event=>{const req=event.request;if(req.method!=='GET')return;const url=new URL(req.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(req).catch(()=>new Response('Sem conexão com a internet. Conecte-se para utilizar o Fluxo Lab.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}})));});";
+      const codigo="const FLUXO_CACHE='fluxo-lab-v5.8.8';\nself.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\nself.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});\nself.addEventListener('fetch',event=>{const req=event.request;if(req.method!=='GET')return;const url=new URL(req.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(req).catch(()=>new Response('Sem conexão com a internet. Conecte-se para utilizar o Fluxo Lab.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}})));});";
   const certificadoInseridoV324 = await env.db.prepare(`INSERT OR IGNORE INTO universidade_certificados_v321 (matricula_id,usuario_id,curso_id,codigo,nome_snapshot,curso_snapshot,carga_horaria_minutos,emitido_em) VALUES (?,?,?,?,?,?,?,?)`).bind(matriculaId,usuario.id,cursoId,codigo,usuario.nome,curso.titulo,curso.carga_horaria_minutos,new Date().toISOString()).run();
   await env.db.prepare(`UPDATE universidade_matriculas_v321 SET status='CONCLUIDO',concluido_em=COALESCE(concluido_em,?) WHERE id=?`).bind(new Date().toISOString(),matriculaId).run();
   if (Number(certificadoInseridoV324.meta?.changes || 0) > 0) await registrarNotificacaoCentralV324(env,usuario.id,"CERTIFICADO","Certificado conquistado",`Seu certificado do curso “${curso.titulo}” foi emitido.`,"/universidade/certificados",`CERTIFICADO:${cursoId}:${matriculaId}`);
@@ -24359,7 +24359,7 @@ export default {
       return new Response(JSON.stringify(manifest),{headers:{"Content-Type":"application/manifest+json; charset=utf-8","Cache-Control":"no-cache","X-Content-Type-Options":"nosniff"}});
     }
     if(request.method==="GET"&&caminho==="/service-worker.js"){
-      const codigo="const FLUXO_CACHE='fluxo-lab-v5.8.7';\nself.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\nself.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});\nself.addEventListener('fetch',event=>{const req=event.request;if(req.method!=='GET')return;const url=new URL(req.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(req).catch(()=>new Response('Sem conexão com a internet. Conecte-se para utilizar o Fluxo Lab.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}})));});";
+      const codigo="const FLUXO_CACHE='fluxo-lab-v5.8.8';\nself.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\nself.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});\nself.addEventListener('fetch',event=>{const req=event.request;if(req.method!=='GET')return;const url=new URL(req.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(req).catch(()=>new Response('Sem conexão com a internet. Conecte-se para utilizar o Fluxo Lab.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}})));});";
       return new Response(codigo,{headers:{"Content-Type":"application/javascript; charset=utf-8","Cache-Control":"no-cache","Service-Worker-Allowed":"/","X-Content-Type-Options":"nosniff"}});
     }
     if(request.method==="GET"&&caminho==="/icon-192.png")return respostaIconePwaV581(192);
