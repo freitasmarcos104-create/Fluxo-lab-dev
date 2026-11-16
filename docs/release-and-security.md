@@ -1,17 +1,35 @@
 # Distribuição e segurança
 
-## Artefatos
-- Windows: instalador NSIS x64, sem assinatura de publicador.
-- Android: APK debug de homologação, não destinado à Play Store.
-- Os dois clientes conectam-se à homologação e exigem internet.
+## Aplicação oficial
 
-## Antes de compartilhar com a equipe
-1. Validar login interno e Cloudflare Access no Windows e Android reais.
-2. Testar upload/download de STL/ZIP, relatórios, navegação, logout e persistência de sessão.
-3. Definir a lista de funcionários autorizados no Cloudflare Access.
-4. Confirmar que EXE/APK não acessam produção.
-5. Para Android release, criar e guardar keystore fora do repositório.
-6. Para Windows, considerar assinatura digital do publicador.
+- Site: https://app.markfree.com.br/.
+- Worker central: fluxo-lab.
+- Windows e Android: clientes do mesmo sistema web central, versão dos instaladores 0.1.5.
+- Atualizações de telas, regras, emblemas, agenda e dados acontecem no Worker. Não é necessário reconstruir os instaladores para essas mudanças.
+
+## Publicação
+
+1. Alterações do Worker ficam em worker/.
+2. Pull Requests executam validação de sintaxe, configuração Cloudflare e testes.
+3. O merge aprovado em main aciona Cloudflare Workers Builds.
+4. Workers Builds executa npm run check e npm run deploy na pasta worker/.
+5. O comando npm run deploy chama cf deploy --mode production.
+
+Não publique pelo editor rápido da Cloudflare, não envie outra cópia de legacy.js e não atualize o Worker por caminhos paralelos.
+
+## Recursos preservados
+
+- D1: fluxo-lab-db.
+- R2: fluxo-lab-downloads, fluxo-lab-importacoes e fluxo-lab-stl.
+- Workers AI: binding AI.
+
+## Antes de distribuir alterações nativas
+
+1. Validar login e navegação no Windows e Android reais.
+2. Testar upload/download de STL/ZIP, relatórios, logout e persistência de sessão.
+3. Confirmar que os clientes continuam apontando para https://app.markfree.com.br/.
+4. Reconstruir EXE/APK somente quando código nativo mudar.
 
 ## Proibido
-Não inserir credenciais, cookies, tokens, keystore, arquivos reais de pacientes ou exports D1 no repositório. Não usar o repositório como backup único dos dados do laboratório.
+
+Não inserir credenciais, cookies, tokens, keystore, dados reais de pacientes ou exports D1 no repositório. Não usar o repositório como backup único dos dados do laboratório. Migrações D1, SQL em produção e operações destrutivas R2 não são executadas pelo pipeline.
