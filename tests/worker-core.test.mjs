@@ -103,7 +103,7 @@ test('rota GET direta do trabalho carrega paciente, etapas e componentes com per
 });
 
 
-import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, setoresDisponiveisAlmox, podeGerenciarAlmox } from "../worker/modules/almoxarifado.js";
+import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, setoresDisponiveisAlmox, podeGerenciarAlmox, atualizarIdentificacaoVersaoAlmoxarifado, injetarLinkAlmoxarifado } from "../worker/modules/almoxarifado.js";
 
 test("Almoxarifado escapa texto antes de inserir dados no HTML", () => {
   assert.equal(escaparHtmlAlmox("<script>&\"'"), "&lt;script&gt;&amp;&quot;&#39;");
@@ -178,3 +178,41 @@ test("conta de almoxarife usa área independente e não ganha acesso de produç�
   assert.match(source, /id="painel-equipe-almox"/);
   assert.match(source, /processarEquipeAlmoxarifado/);
 });
+
+test("interface identifica a versão 5.10.0 nas páginas HTML", () => {
+  const html = '<title>Fluxo Lab V5.9.0</title><span>V5.9.0</span>';
+  assert.equal(
+    atualizarIdentificacaoVersaoAlmoxarifado(html, "/funcionarios"),
+    '<title>Fluxo Lab V5.10.0</title><span>V5.10.0</span>'
+  );
+});
+
+test("service worker recebe uma chave de cache nova na V5.10.0", () => {
+  const source = "const FLUXO_CACHE='fluxo-lab-v5.9.0';";
+  assert.equal(
+    atualizarIdentificacaoVersaoAlmoxarifado(source, "/service-worker.js"),
+    "const FLUXO_CACHE='fluxo-lab-v5.10.0';"
+  );
+});
+
+test("injeta menu e versão atualizada no HTML servido pelo Worker legado", async () => {
+  const body = '<html><body><span>Fluxo Lab V5.9.0</span><nav class="sidebar-nav"><a href="/">Início</a></nav></body></html>';
+  const response = await injetarLinkAlmoxarifado(
+    new Response(body, {status:200,headers:{"content-type":"text/html; charset=utf-8","content-length":String(body.length)}}),
+    new Request("https://app.markfree.com.br/funcionarios")
+  );
+  const html = await response.text();
+  assert.match(html, /V5\.10\.0/);
+  assert.match(html, /href="\/almoxarifado"/);
+  assert.equal(response.headers.get("content-length"), null);
+});
+
+test("injeta cache novo no service worker sem alterar outros scripts", async () => {
+  const body = "const FLUXO_CACHE='fluxo-lab-v5.9.0';";
+  const response = await injetarLinkAlmoxarifado(
+    new Response(body, {status:200,headers:{"content-type":"application/javascript; charset=utf-8"}}),
+    new Request("https://app.markfree.com.br/service-worker.js")
+  );
+  assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.10.0';");
+});
+
