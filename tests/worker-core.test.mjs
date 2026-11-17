@@ -103,7 +103,7 @@ test('rota GET direta do trabalho carrega paciente, etapas e componentes com per
 });
 
 
-import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, setoresDisponiveisAlmox, podeGerenciarAlmox, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife, atualizarIdentificacaoVersaoAlmoxarifado, injetarLinkAlmoxarifado } from "../worker/modules/almoxarifado.js";
+import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, integrarTelaAlmoxarifado, setoresDisponiveisAlmox, podeGerenciarAlmox, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife, atualizarIdentificacaoVersaoAlmoxarifado, injetarLinkAlmoxarifado } from "../worker/modules/almoxarifado.js";
 
 test("Almoxarifado escapa texto antes de inserir dados no HTML", () => {
   assert.equal(escaparHtmlAlmox("<script>&\"'"), "&lt;script&gt;&amp;&quot;&#39;");
@@ -169,6 +169,12 @@ test("funcionário Almoxarife entra no painel exclusivo e não acessa páginas g
   assert.equal(deveBloquearRotaAlmoxarife(true, "/logout", "POST"), false);
   assert.equal(deveBloquearRotaAlmoxarife(true, "/service-worker.js", "GET"), false);
   assert.equal(deveBloquearRotaAlmoxarife(true, "/manifest.webmanifest", "GET"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/meu-espaco", "GET"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/comunicacao", "GET"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/agenda-tarefas", "GET"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/digital", "GET"), true);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/digital/chat-equipe", "GET"), true);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/minha-producao", "GET"), true);
   assert.equal(deveBloquearRotaAlmoxarife(false, "/funcionarios", "GET"), false);
 });
 
@@ -210,24 +216,24 @@ test("conta de almoxarife usa área independente e não ganha acesso de produç�
   assert.match(source, /processarEquipeAlmoxarifado/);
 });
 
-test("interface identifica a versão 5.11.0 nas páginas HTML", () => {
-  const html = '<title>Fluxo Lab V5.9.0</title><span>V5.10.0</span>';
+test("interface identifica a versão 5.12.0 nas páginas HTML", () => {
+  const html = '<title>Fluxo Lab V5.9.0</title><span>V5.10.0 · V5.11.0</span>';
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(html, "/funcionarios"),
-    '<title>Fluxo Lab V5.11.0</title><span>V5.11.0</span>'
+    '<title>Fluxo Lab V5.12.0</title><span>V5.12.0 · V5.12.0</span>'
   );
 });
 
-test("service worker recebe uma chave de cache nova na V5.11.0", () => {
-  const source = "const FLUXO_CACHE='fluxo-lab-v5.9.0';const OLD='fluxo-lab-v5.10.0';";
+test("service worker recebe uma chave de cache nova na V5.12.0", () => {
+  const source = "const FLUXO_CACHE='fluxo-lab-v5.9.0';const OLD='fluxo-lab-v5.10.0';const PREV='fluxo-lab-v5.11.0';";
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(source, "/service-worker.js"),
-    "const FLUXO_CACHE='fluxo-lab-v5.11.0';const OLD='fluxo-lab-v5.11.0';"
+    "const FLUXO_CACHE='fluxo-lab-v5.12.0';const OLD='fluxo-lab-v5.12.0';const PREV='fluxo-lab-v5.12.0';"
   );
 });
 
 test("injeta menu e versão atualizada no HTML servido pelo Worker legado", async () => {
-  const body = '<html><body><span>Fluxo Lab V5.9.0</span><nav class="sidebar-nav"><a href="/">Início</a></nav></body></html>';
+  const body = '<html><body><span>Fluxo Lab V5.9.0</span><nav class="sidebar-nav"><details class="nav-bloco-v325"><div class="nav-bloco-itens-v325"><a href="/">Início</a></div></details><details class="nav-bloco-v325"><div class="nav-bloco-itens-v325"><a href="/meu-espaco">Meu Espaço</a></div></details></nav></body></html>';
   const response = await injetarLinkAlmoxarifado(
     new Response(body, {status:200,headers:{"content-type":"text/html; charset=utf-8","content-length":String(body.length)}}),
     new Request("https://app.markfree.com.br/funcionarios")
@@ -238,12 +244,63 @@ test("injeta menu e versão atualizada no HTML servido pelo Worker legado", asyn
   assert.equal(response.headers.get("content-length"), null);
 });
 
+
+test("página do Almoxarifado usa o layout e o menu lateral nativos do Fluxo Lab", async () => {
+  const almox = new Response('<html><body><main class="wrap"><div class="intro"><h1>Consultar materiais</h1></div><nav aria-label="Navegação do almoxarifado"><a href="/almoxarifado?view=itens">Consultar materiais</a></nav><section class="panel">Catálogo</section></main></body></html>', {
+    status:200,headers:{"content-type":"text/html; charset=utf-8"}
+  });
+  const shell = new Response('<html><head><title>Meu perfil · Fluxo Lab</title></head><body><aside class="sidebar"><nav class="sidebar-nav"><a href="/almoxarifado">Almoxarifado</a></nav></aside><header><div class="topbar-titulo"><strong>Meu perfil</strong></div></header><main class="container"><section>Conteúdo substituído</section></main></body></html>', {
+    status:200,headers:{"content-type":"text/html; charset=utf-8"}
+  });
+  const response = await integrarTelaAlmoxarifado(almox,shell);
+  const html = await response.text();
+  assert.match(html, /sidebar/);
+  assert.match(html, /topbar-titulo/);
+  assert.match(html, /Almoxarifado · Fluxo Lab/);
+  assert.match(html, /<strong>Almoxarifado<\\/strong>/);
+  assert.match(html, /estilo-almoxarifado-integrado/);
+  assert.match(html, /almox-integrado/);
+  assert.doesNotMatch(html, /<main class="wrap">/);
+});
+
+test("funcionário comum não recebe acesso à gestão de lotes ou movimentos", async () => {
+  const source = await readFile(new URL("../worker/modules/almoxarifado.js", import.meta.url), "utf8");
+  assert.match(source, /if \(!gerente\) return respostaJson\(\{erro:"Consulta de lotes restrita/);
+  assert.match(source, /if \(!gerente\) return respostaJson\(\{erro:"Histórico restrito/);
+  assert.match(source, /dadosRequisicoes\(env,gerente \? null : user\)/);
+});
+
+test("o menu Almoxarifado separa a área operacional do espaço do colaborador", async () => {
+  const source = await readFile(new URL("../worker/modules/almoxarifado.js", import.meta.url), "utf8");
+  assert.match(source, /if \(almoxarife\) \{/);
+  assert.match(source, /Meu Espaço/);
+  assert.match(source, /Chat da equipe/);
+  assert.match(source, /Comunicação e solicitações/);
+  assert.match(source, /if \(bloco === 1\) return open \+ link \+ close/);
+  assert.match(source, /if \(bloco === 2\)/);
+});
+
+test("o Almoxarifado possui chat próprio e não usa o chat da produção Digital", async () => {
+  const source = await readFile(new URL("../worker/modules/almoxarifado.js", import.meta.url), "utf8");
+  assert.match(source, /almoxarifado_chat_mensagens/);
+  assert.match(source, /path === "\/almoxarifado\/chat"/);
+  assert.match(source, /Acesso restrito à equipe do Almoxarifado/);
+  assert.match(source, /href="\/almoxarifado\/chat"/);
+});
+
+test("a atualização conserva apenas um ponto de entrada e integra o shell oficial", async () => {
+  const source = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
+  assert.match(source, /integrarTelaAlmoxarifado/);
+  assert.match(source, /new URL\("\/meu-perfil", request.url\)/);
+  assert.match(source, /injetarLinkAlmoxarifado\(response, request, env\)/);
+});
+
 test("injeta cache novo no service worker sem alterar outros scripts", async () => {
   const body = "const FLUXO_CACHE='fluxo-lab-v5.9.0';";
   const response = await injetarLinkAlmoxarifado(
     new Response(body, {status:200,headers:{"content-type":"application/javascript; charset=utf-8"}}),
     new Request("https://app.markfree.com.br/service-worker.js")
   );
-  assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.11.0';");
+  assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.12.0';");
 });
 

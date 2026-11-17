@@ -1,4 +1,4 @@
-# Fluxo Lab Worker V5.11.0
+# Fluxo Lab Worker V5.12.0
 
 Fonte oficial do Worker de produção. O navegador, o aplicativo Windows e o aplicativo Android acessam o mesmo sistema:
 
@@ -7,6 +7,12 @@ Fonte oficial do Worker de produção. O navegador, o aplicativo Windows e o apl
 - Código-fonte de desenvolvimento: este diretório worker/
 - Ponto de entrada: index.js
 - Módulos do Worker: core/, domains/, routes/, services/ e modules/
+
+## Novidade da V5.12.0
+
+O Almoxarifado passou a abrir dentro do layout padrão do Fluxo Lab, pela barra lateral de Operação do Laboratório. Funcionários comuns consultam materiais e enviam requisições; Almoxarifes e Administradores/Coordenadores têm gestão de estoque. O Almoxarife mantém acesso ao Espaço do Colaborador e ao chat próprio do setor, sem acesso às áreas de produção.
+
+A migração `0003_v5120_almoxarifado_chat.sql` cria apenas a tabela de mensagens do chat do Almoxarifado.
 
 ## Novidade da V5.11.0
 
