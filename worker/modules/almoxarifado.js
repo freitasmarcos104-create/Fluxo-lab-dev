@@ -4,7 +4,13 @@ import { cabecalhosSegurancaV30, htmlResponse } from "../core/http.js";
 const TIPOS_ITEM = ["REAGENTE", "PADRAO", "CONSUMIVEL", "KIT", "VIDRARIA", "EPI"];
 const UNIDADES = ["mL", "g", "un"];
 const STATUS_LOTE = ["DISPONIVEL", "QUARENTENA", "BLOQUEADO"];
-const SETORES = ["CAD/CAM", "FATIAMENTO", "IMPRESSAO", "ACABAMENTO", "CONVENCIONAL", "ADMINISTRACAO", "GERAL"];
+const SETORES_DIGITAIS = ["CAD/CAM", "FATIAMENTO", "IMPRESSAO", "ACABAMENTO"];
+const SETORES_CONVENCIONAIS = ["ARTICULACAO", "MONTAGEM", "ENCERRAMENTO", "ESCULTURA", "INCLUSAO", "ACRILIZACAO", "DESINCLUSAO", "ACABAMENTO", "QUALIDADE"];
+const SETORES_VALIDOS = [
+  ...SETORES_DIGITAIS.map((setor) => "DIGITAL:" + setor),
+  ...SETORES_CONVENCIONAIS.map((setor) => "CONVENCIONAL:" + setor),
+  "GERAL"
+];
 
 function gerenteAlmox(user) {
   return ["ADMINISTRADOR", "COORDENADOR"].includes(String(user?.perfil || "").toUpperCase());
@@ -46,12 +52,38 @@ function numeroPositivo(value, label = "Quantidade") {
   return n;
 }
 
-function nomeSetor(user) {
-  const setor = String(user?.setor || user?.setor_convencional || "").trim().toUpperCase();
-  if (SETORES.includes(setor)) return setor;
-  if (setor === "IMPRESSÃO") return "IMPRESSAO";
-  if (setor === "ADMINISTRAÇÃO") return "ADMINISTRACAO";
-  return "GERAL";
+export function setoresDisponiveisAlmox(user) {
+  if (gerenteAlmox(user)) return [...SETORES_VALIDOS];
+  const atribuicoes = String(user?.setores_v31 || "")
+    .split("|")
+    .map((valor) => valor.trim().toUpperCase())
+    .filter((valor) => SETORES_VALIDOS.includes(valor));
+  if (atribuicoes.length) return [...new Set(atribuicoes)];
+  const convencional = String(user?.setor_convencional || "").trim().toUpperCase();
+  if (SETORES_CONVENCIONAIS.includes(convencional)) return ["CONVENCIONAL:" + convencional];
+  const direto = String(user?.setor || "").trim().toUpperCase();
+  if (SETORES_DIGITAIS.includes(direto)) return ["DIGITAL:" + direto];
+  if (SETORES_CONVENCIONAIS.includes(direto)) return ["CONVENCIONAL:" + direto];
+  if (direto === "IMPRESSÃO") return ["DIGITAL:IMPRESSAO"];
+  return ["GERAL"];
+}
+
+function rotuloSetorAlmox(valor) {
+  if (valor === "GERAL") return "Geral / sem setor específico";
+  const [area, setor] = String(valor).split(":");
+  const nomes = {
+    ARTICULACAO: "Articulação", MONTAGEM: "Montagem", ENCERRAMENTO: "Encerramento",
+    ESCULTURA: "Escultura", INCLUSAO: "Inclusão", ACRILIZACAO: "Acrilização",
+    DESINCLUSAO: "Desinclusão", QUALIDADE: "Qualidade", IMPRESSAO: "Impressão"
+  };
+  return (nomes[setor] || setor) + (area === "DIGITAL" ? " · Digital" : " · Convencional");
+}
+
+function nomeSetor(user, solicitado) {
+  const disponiveis = setoresDisponiveisAlmox(user);
+  const setor = String(solicitado || disponiveis[0] || "GERAL").trim().toUpperCase();
+  if (!disponiveis.includes(setor)) throw new Error("O setor selecionado não está vinculado à sua conta.");
+  return setor;
 }
 
 async function primeiro(db, sql, ...params) {
@@ -132,9 +164,10 @@ async function criarRequisicao(env, user, body) {
   const item = await primeiro(env.db, "SELECT id FROM almoxarifado_itens WHERE id=? AND ativo=1", itemId);
   if (!item) throw new Error("Selecione um item ativo.");
   const observacao = String(body.observacao || "").trim().slice(0, 300) || null;
+  const setor = nomeSetor(user, body.setor);
   const result = await executar(env.db,
     "INSERT INTO almoxarifado_requisicoes (solicitante_id,setor,observacao) VALUES (?,?,?)",
-    user.id, nomeSetor(user), observacao);
+    user.id, setor, observacao);
   const requisicaoId = Number(result?.meta?.last_row_id || 0);
   if (!requisicaoId) throw new Error("Não foi possível abrir a requisição.");
   await executar(env.db,
@@ -361,8 +394,13 @@ function formularioEntrada(itens) {
     '<option value="QUARENTENA">Aguardando conferência · quarentena</option></select></label><div class="acoes"><button>Registrar entrada</button></div></form>';
 }
 
-function formularioRequisicao(itens) {
+function formularioRequisicao(itens, user) {
+  const setores = setoresDisponiveisAlmox(user);
+  const opcoesSetor = setores.map((setor) => '<option value="' + escaparHtmlAlmox(setor) + '">' +
+    escaparHtmlAlmox(rotuloSetorAlmox(setor)) + "</option>").join("");
   return '<form class="form-grid" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="requisitar">' +
+    '<label>Setor<select name="setor" required>' + (setores.length > 1 ? '<option value="">Selecione seu setor</option>' : "") +
+    opcoesSetor + '</select></label>' +
     '<label class="largo">Material<select name="item_id" required>' + selItens(itens) + '</select></label>' +
     '<label>Quantidade<input name="quantidade" type="number" min="0.001" step="0.001" required></label>' +
     '<label class="largo">Observação / finalidade<input name="observacao" maxlength="300" placeholder="Onde ou para que será usado?"></label>' +
@@ -455,7 +493,7 @@ async function renderView(env, user, url) {
       formularioEntrada(itens) + '</section>' : '<section class="panel"><p>Entrada de materiais restrita à administração e coordenação.</p></section>';
   } else if (view === "requisicoes") {
     requisicoes = await dadosRequisicoes(env);
-    content = '<section class="panel"><h2>Solicitar material</h2>' + formularioRequisicao(itens) + '</section>' +
+    content = '<section class="panel"><h2>Solicitar material</h2>' + formularioRequisicao(itens,user) + '</section>' +
       '<section class="panel"><h2>Pedidos registrados</h2>' + renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
   } else if (view === "lotes") {
     content = '<section class="panel"><h2>Lotes e saldos</h2><p class="muted">Sugestão de atendimento ordenada por FEFO. Lotes vencidos, em quarentena ou bloqueados não podem ser usados em saídas comuns.</p>' +
@@ -502,7 +540,7 @@ async function processarFormulario(request, env, user) {
     return "/almoxarifado?view=entrada&ok=" + encodeURIComponent("Entrada registrada no histórico.");
   }
   if (action === "requisitar") {
-    await criarRequisicao(env,user,{item_id:get("item_id"),quantidade:get("quantidade"),observacao:get("observacao")});
+    await criarRequisicao(env,user,{item_id:get("item_id"),quantidade:get("quantidade"),observacao:get("observacao"),setor:get("setor")});
     return "/almoxarifado?view=requisicoes&ok=" + encodeURIComponent("Requisição enviada ao Almoxarifado.");
   }
   if (action === "atender") {
