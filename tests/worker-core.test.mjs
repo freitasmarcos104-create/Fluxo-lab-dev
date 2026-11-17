@@ -302,7 +302,7 @@ test("o menu Almoxarifado separa a área operacional do espaço do colaborador",
 test("o Almoxarifado possui chat próprio e não usa o chat da produção Digital", async () => {
   const source = await readFile(new URL("../worker/modules/almoxarifado.js", import.meta.url), "utf8");
   assert.match(source, /almoxarifado_chat_mensagens/);
-  assert.match(source, /path === "\/almoxarifado\/chat"/);
+  assert.match(source, /url\.pathname === "\/almoxarifado\/chat"/);
   assert.match(source, /Acesso restrito à equipe do Almoxarifado/);
   assert.match(source, /href="\/almoxarifado\/chat"/);
 });
