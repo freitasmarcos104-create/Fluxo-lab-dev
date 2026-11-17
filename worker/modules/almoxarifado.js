@@ -832,13 +832,15 @@ export function atualizarIdentificacaoVersaoAlmoxarifado(conteudo, pathname) {
       .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.13.0")
       .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.13.0")
       .replaceAll("fluxo-lab-v5.11.0", "fluxo-lab-v5.13.0")
-      .replaceAll("fluxo-lab-v5.12.0", "fluxo-lab-v5.13.0");
+      .replaceAll("fluxo-lab-v5.12.0", "fluxo-lab-v5.13.1")
+      .replaceAll("fluxo-lab-v5.13.0", "fluxo-lab-v5.13.1");
   }
   return texto
     .replaceAll("V5.9.0", "V5.13.0")
     .replaceAll("V5.10.0", "V5.13.0")
     .replaceAll("V5.11.0", "V5.13.0")
-    .replaceAll("V5.12.0", "V5.13.0");
+    .replaceAll("V5.12.0", "V5.13.1")
+    .replaceAll("V5.13.0", "V5.13.1");
 }
 
 
@@ -996,6 +998,9 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
     const chat = '<a href="/digital/chat-equipe"><span class="nav-icone">💬</span><span>Chat Geral</span></a>';
 
     if (almoxarife) {
+      // Remove um atalho legado antes de reconstruir o grupo do colaborador.
+      // A remoção depois da injeção apagava também o novo link do Chat Geral.
+      updated = updated.replace(/<a\b[^>]*href="\/digital\/chat-equipe"[^>]*>[\s\S]*?<\/a>/gi,"");
       let bloco = 0;
       updated = updated.replace(/(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/g,(whole,open,inner,close) => {
         bloco++;
@@ -1016,7 +1021,6 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
         }
         return whole;
       });
-      updated = updated.replace(/<a\b[^>]*href="\/digital\/chat-equipe"[^>]*>[\s\S]*?<\/a>/gi,"");
       // Abra os dois grupos do menu para que Almoxarifado e Espaço do Colaborador
       // fiquem visíveis logo após o login, sem o usuário precisar expandir seções.
       updated = updated.replace(/<details class="nav-bloco-v325"(?![^>]*\bopen\b)/g,'<details class="nav-bloco-v325" open');

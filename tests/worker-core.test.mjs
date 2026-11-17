@@ -219,19 +219,19 @@ test("conta de almoxarife usa área independente e não ganha acesso de produç�
   assert.match(source, /processarEquipeAlmoxarifado/);
 });
 
-test("interface identifica a versão 5.13.0 nas páginas HTML", () => {
+test("interface identifica a versão 5.13.1 nas páginas HTML", () => {
   const html = '<title>Fluxo Lab V5.9.0</title><span>V5.10.0 · V5.11.0 · V5.12.0</span>';
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(html, "/funcionarios"),
-    '<title>Fluxo Lab V5.13.0</title><span>V5.13.0 · V5.13.0 · V5.13.0</span>'
+    '<title>Fluxo Lab V5.13.1</title><span>V5.13.1 · V5.13.1 · V5.13.1</span>'
   );
 });
 
-test("service worker recebe uma chave de cache nova na V5.13.0", () => {
+test("service worker recebe uma chave de cache nova na V5.13.1", () => {
   const source = "const FLUXO_CACHE='fluxo-lab-v5.9.0';const OLD='fluxo-lab-v5.10.0';const PREV='fluxo-lab-v5.11.0';";
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(source, "/service-worker.js"),
-    "const FLUXO_CACHE='fluxo-lab-v5.13.0';const OLD='fluxo-lab-v5.13.0';const PREV='fluxo-lab-v5.13.0';"
+    "const FLUXO_CACHE='fluxo-lab-v5.13.1';const OLD='fluxo-lab-v5.13.1';const PREV='fluxo-lab-v5.13.1';"
   );
 });
 
@@ -242,12 +242,34 @@ test("injeta menu e versão atualizada no HTML servido pelo Worker legado", asyn
     new Request("https://app.markfree.com.br/funcionarios")
   );
   const html = await response.text();
-  assert.match(html, /V5.13.0/);
+  assert.match(html, /V5.13.1/);
   assert.match(html, /href="\/almoxarifado"/);
   assert.equal(response.headers.get("content-length"), null);
 });
 
 
+
+test("o menu do Almoxarife mantém exatamente um atalho para o Chat Geral", async () => {
+  const body = '<html><body><nav class="sidebar-nav">' +
+    '<details class="nav-bloco-v325"><div class="nav-bloco-itens-v325"><a href="/">Início</a></div></details>' +
+    '<details class="nav-bloco-v325"><div class="nav-bloco-itens-v325"><a href="/meu-espaco">Meu Espaço</a><a href="/digital/chat-equipe">Chat Geral antigo</a></div></details>' +
+    '</nav></body></html>';
+  const user = {id:9,nome:"Yan",usuario:"yan",perfil:"FUNCIONARIO",ativo:1,excluido:0};
+  const env = {db:{prepare(sql){return {bind(){return {first:async()=>{
+    if(sql.includes("FROM sessoes s"))return user;
+    if(sql.includes("FROM almoxarifado_equipe ae"))return {1:1};
+    return null;
+  }}}}}}};
+  const response = await injetarLinkAlmoxarifado(
+    new Response(body,{status:200,headers:{"content-type":"text/html; charset=utf-8"}}),
+    new Request("https://app.markfree.com.br/meu-perfil",{headers:{Cookie:"fluxo_session=teste"}}),
+    env
+  );
+  const html = await response.text();
+  assert.match(html,/Chat Geral/);
+  assert.equal(html.split('href="/digital/chat-equipe"').length - 1,1);
+  assert.ok(html.includes('href="/almoxarifado"'));
+});
 
 test("Espaço do Colaborador do Almoxarife preserva ferramentas pessoais sem mostrar produção", () => {
   const html = renderEspacoColaboradorAlmoxarife({nome:"Yan"});
@@ -327,6 +349,6 @@ test("injeta cache novo no service worker sem alterar outros scripts", async () 
     new Response(body, {status:200,headers:{"content-type":"application/javascript; charset=utf-8"}}),
     new Request("https://app.markfree.com.br/service-worker.js")
   );
-  assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.13.0';");
+  assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.13.1';");
 });
 
