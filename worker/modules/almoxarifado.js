@@ -80,11 +80,12 @@ async function criarItem(env, user, body) {
   const nome = String(body.nome || "").trim().slice(0, 120);
   const local = String(body.local_padrao || "").trim().slice(0, 100);
   const minimo = Number(body.quantidade_minima ?? 0);
+  const controlaLote = ["REAGENTE", "PADRAO", "KIT"].includes(tipo) || Boolean(body.controla_lote);
   if (!codigo || !nome || !local) throw new Error("Código, nome e local padrão são obrigatórios.");
   if (!Number.isFinite(minimo) || minimo < 0) throw new Error("O estoque mínimo não pode ser negativo.");
   await executar(env.db,
     "INSERT INTO almoxarifado_itens (codigo,nome,tipo,unidade,local_padrao,quantidade_minima,controla_lote,criado_por) VALUES (?,?,?,?,?,?,?,?)",
-    codigo, nome, tipo, unidade, local, minimo, body.controla_lote ? 1 : 0, user.id);
+    codigo, nome, tipo, unidade, local, minimo, controlaLote ? 1 : 0, user.id);
 }
 
 async function receberMaterial(env, user, body) {
@@ -216,7 +217,7 @@ async function alterarStatusLote(env, body) {
 async function dadosItens(env, busca = "") {
   const termo = String(busca || "").trim().toLowerCase();
   return todos(env.db,
-    "SELECT i.*,COALESCE(SUM(s.saldo),0) AS saldo_total FROM almoxarifado_itens i LEFT JOIN almoxarifado_saldos_lotes s ON s.item_id=i.id WHERE i.ativo=1 AND (?='' OR lower(i.codigo) LIKE ? OR lower(i.nome) LIKE ?) GROUP BY i.id ORDER BY i.nome COLLATE NOCASE",
+    "SELECT i.*,COALESCE(SUM(s.saldo),0) AS saldo_total,COALESCE(SUM(CASE WHEN s.status_lote='DISPONIVEL' AND (s.validade IS NULL OR s.validade>=date('now')) THEN s.saldo ELSE 0 END),0) AS saldo_disponivel FROM almoxarifado_itens i LEFT JOIN almoxarifado_saldos_lotes s ON s.item_id=i.id WHERE i.ativo=1 AND (?='' OR lower(i.codigo) LIKE ? OR lower(i.nome) LIKE ?) GROUP BY i.id ORDER BY i.nome COLLATE NOCASE",
     termo, "%" + termo + "%", "%" + termo + "%");
 }
 
@@ -275,14 +276,16 @@ function selItens(itens) {
 
 function renderTabelaItens(itens) {
   if (!itens.length) return '<p class="vazio">Nenhum item cadastrado.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Código</th><th>Item</th><th>Tipo</th><th>Saldo</th><th>Mínimo</th><th>Controle</th><th>Situação</th></tr></thead><tbody>' +
+  return '<div class="tabela-wrap"><table><thead><tr><th>Código</th><th>Item</th><th>Tipo</th><th>Disponível</th><th>Total físico</th><th>Mínimo</th><th>Controle</th><th>Situação</th></tr></thead><tbody>' +
     itens.map((item) => {
-      const saldo = Number(item.saldo_total || 0);
+      const saldo = Number(item.saldo_disponivel || 0);
+      const total = Number(item.saldo_total || 0);
       const minimo = Number(item.quantidade_minima || 0);
-      const status = saldo <= 0 ? "SEM ESTOQUE" : saldo < minimo ? "ABAIXO DO MÍNIMO" : "NORMAL";
+      const status = saldo <= 0 ? "SEM ESTOQUE DISPONÍVEL" : saldo < minimo ? "ABAIXO DO MÍNIMO" : "NORMAL";
       return '<tr><td>' + escaparHtmlAlmox(item.codigo) + '</td><td><a href="/almoxarifado?view=item&id=' + item.id + '">' + escaparHtmlAlmox(item.nome) +
         '</a></td><td>' + escaparHtmlAlmox(item.tipo) + '</td><td class="numero">' + saldo + " " + escaparHtmlAlmox(item.unidade) +
-        '</td><td class="numero">' + minimo + '</td><td>' + (item.controla_lote ? "Lote e validade" : "Lote interno") +
+        '</td><td class="numero">' + total + " " + escaparHtmlAlmox(item.unidade) + '</td><td class="numero">' + minimo +
+        '</td><td>' + (item.controla_lote ? "Lote e validade" : "Lote interno") +
         '</td><td><span class="status ' + classeStatus(status) + '">' + status + "</span></td></tr>";
     }).join("") + "</tbody></table></div>";
 }
@@ -296,7 +299,7 @@ function renderTabelaLotes(lotes, gerente) {
       '</td><td>' + escaparHtmlAlmox(l.localizacao) + '</td><td class="numero">' + Number(l.saldo || 0) + " " +
       escaparHtmlAlmox(l.unidade) + '</td><td><span class="status ' + classeStatus(l.status_exibicao) + '">' + escaparHtmlAlmox(l.status_exibicao) +
       "</span></td>" + (gerente ? '<td><form class="linha-form" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="status_lote">' +
-      '<input type="hidden" name="lote_id" value="' + l.lote_id + '"><select name="status"><option value="DISPONIVEL">Disponível</option>' +
+      '<input type="hidden" name="lote_id" value="' + l.lote_id + '"><select name="status" required><option value="">Alterar situação...</option><option value="DISPONIVEL">Disponível</option>' +
       '<option value="QUARENTENA">Quarentena</option><option value="BLOQUEADO">Bloqueado</option></select><button class="secundario">Salvar</button></form></td>' : "") +
       "</tr>"
     ).join("") + "</tbody></table></div>";
@@ -304,10 +307,11 @@ function renderTabelaLotes(lotes, gerente) {
 
 function renderTabelaMovimentos(movimentos) {
   if (!movimentos.length) return '<p class="vazio">Ainda não existem movimentos.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Data</th><th>Item</th><th>Lote</th><th>Movimento</th><th>Quantidade</th><th>Origem</th><th>Usuário</th><th>Motivo</th></tr></thead><tbody>' +
+  return '<div class="tabela-wrap"><table><thead><tr><th>Data</th><th>Item</th><th>Lote</th><th>Movimento</th><th>Quantidade</th><th>Origem</th><th>Local</th><th>Usuário</th><th>Motivo</th></tr></thead><tbody>' +
     movimentos.map((m) => '<tr><td>' + escaparHtmlAlmox(m.criado_em) + '</td><td>' + escaparHtmlAlmox(m.codigo + " · " + m.item_nome) +
       '</td><td>' + escaparHtmlAlmox(m.codigo_lote) + '</td><td>' + escaparHtmlAlmox(m.tipo) + '</td><td class="numero">' +
       Number(m.quantidade) + " " + escaparHtmlAlmox(m.unidade) + '</td><td>' + escaparHtmlAlmox(m.origem_tipo || "—") +
+      '</td><td>' + escaparHtmlAlmox([m.local_origem,m.local_destino].filter(Boolean).join(" → ") || "—") +
       '</td><td>' + escaparHtmlAlmox(m.usuario_nome || "—") + '</td><td>' + escaparHtmlAlmox(m.motivo || "—") + "</td></tr>"
     ).join("") + "</tbody></table></div>";
 }
@@ -340,7 +344,8 @@ function formularioItem() {
     '<label>Unidade única<select name="unidade"><option>un</option><option>mL</option><option>g</option></select></label>' +
     '<label>Local padrão<input name="local_padrao" maxlength="100" required placeholder="Ex.: Armário A"></label>' +
     '<label>Estoque mínimo<input name="quantidade_minima" type="number" min="0" step="0.001" value="0" required></label>' +
-    '<label class="checkbox"><input type="checkbox" name="controla_lote" value="1"> Controla lote e validade</label>' +
+    '<p class="muted">Reagentes, padrões e kits exigem lote e validade automaticamente. Os demais tipos podem ativar esse controle.</p>' +
+    '<label class="checkbox"><input type="checkbox" name="controla_lote" value="1"> Controla lote e validade para este item</label>' +
     '<div class="acoes"><button>Cadastrar item</button></div></form>';
 }
 
@@ -425,7 +430,7 @@ async function renderView(env, user, url) {
   const notice = String(url.searchParams.get("ok") || url.searchParams.get("erro") || "");
   if (view === "dashboard") {
     const painel = await dadosPainel(env);
-    const abaixo = itens.filter((i) => Number(i.saldo_total) < Number(i.quantidade_minima));
+    const abaixo = itens.filter((i) => Number(i.saldo_disponivel) < Number(i.quantidade_minima));
     const vencendo = lotes.filter((l) => Number(l.saldo) > 0 && l.validade && l.validade >= new Date().toISOString().slice(0, 10) &&
       l.validade <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) && l.status_exibicao === "DISPONIVEL");
     content = '<div class="grid">' +
@@ -468,7 +473,8 @@ async function renderView(env, user, url) {
       const lotesItem = lotes.filter((x) => Number(x.item_id) === itemId);
       const movs = (await dadosMovimentos(env)).filter((x) => Number(x.item_id) === itemId);
       content = '<section class="panel"><h2>' + escaparHtmlAlmox(item.codigo + " · " + item.nome) + '</h2><div class="detail">' +
-        '<div><small>Saldo total</small><strong>' + Number(item.saldo_total) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
+        '<div><small>Saldo disponível</small><strong>' + Number(item.saldo_disponivel) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
+        '<div><small>Saldo físico total</small><strong>' + Number(item.saldo_total) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
         '<div><small>Estoque mínimo</small><strong>' + Number(item.quantidade_minima) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
         '<div><small>Local padrão</small><strong>' + escaparHtmlAlmox(item.local_padrao) + '</strong></div>' +
         '<div><small>Rastreabilidade</small><strong>' + (item.controla_lote ? "Lote e validade" : "Lote interno") + '</strong></div>' +
