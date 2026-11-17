@@ -611,14 +611,14 @@ async function handleApi(request, env, url, user) {
 }
 
 async function listarEquipeAlmoxarifado(env) {
-  return todos(env.db, \`
+  return todos(env.db, `
     SELECT u.id,u.nome,u.usuario,u.ativo,u.excluido,
       ae.funcao AS funcao_almox,ae.ativo AS almox_ativo
     FROM usuarios u
     LEFT JOIN almoxarifado_equipe ae ON ae.usuario_id=u.id
     WHERE u.perfil='FUNCIONARIO' AND u.excluido=0
     ORDER BY u.ativo DESC,u.nome COLLATE NOCASE
-  \`);
+  `);
 }
 
 function renderPainelEquipeAlmoxarifado(usuarios) {
@@ -628,7 +628,7 @@ function renderPainelEquipeAlmoxarifado(usuarios) {
     '<tr><td><strong>' + escaparHtmlAlmox(u.nome) + '</strong><div class="mini">' + escaparHtmlAlmox(u.usuario) +
     '</div></td><td><span class="badge ok">Almoxarife</span></td><td><form method="POST" action="/almoxarifado/equipe/remover" class="acao-inline">' +
     '<input type="hidden" name="usuario_id" value="' + Number(u.id) + '">' +
-    '<button class="botao-perigo" onclick="return confirm(\\'Remover a função de Almoxarife deste funcionário? A conta continuará ativa.\\')">Remover função</button>' +
+    '<button class="botao-perigo" type="submit">Remover função</button>' +
     '</form></td></tr>'
   ).join("") : '<tr><td colspan="3">Nenhum almoxarife designado.</td></tr>';
   const opcoes = disponiveis.map((u) =>
@@ -672,18 +672,18 @@ async function processarEquipeAlmoxarifado(request, env, user, path) {
     const duplicado = await primeiro(env.db,"SELECT id FROM usuarios WHERE lower(usuario)=? LIMIT 1",login);
     if (duplicado) throw new Error("Esse nome de usuário já está cadastrado.");
     const hash = await criarHashSenha(senha);
-    const r = await executar(env.db, \`
+    const r = await executar(env.db, `
       INSERT INTO usuarios
         (nome,usuario,senha_hash,setor,area_producao,setor_convencional,perfil,ativo,excluido)
       VALUES (?,?,?,'ALMOXARIFADO','ALMOXARIFADO',NULL,'FUNCIONARIO',1,0)
-    \`,nome,login,hash);
+    `,nome,login,hash);
     const id = Number(r?.meta?.last_row_id || 0);
     if (!id) throw new Error("A conta foi criada sem retornar o identificador. Verifique a Equipe antes de repetir.");
     try {
-      await executar(env.db, \`
+      await executar(env.db, `
         INSERT INTO almoxarifado_equipe (usuario_id,funcao,ativo,atribuido_por)
         VALUES (?,'ALMOXARIFE',1,?)
-      \`,id,Number(user.id));
+      `,id,Number(user.id));
     } catch (error) {
       await executar(env.db,"UPDATE usuarios SET ativo=0,excluido=1 WHERE id=?",id);
       throw new Error("Não foi possível atribuir a função de Almoxarife. A conta recém-criada foi desativada para evitar acesso incompleto. " + String(error?.message || ""));
@@ -695,13 +695,13 @@ async function processarEquipeAlmoxarifado(request, env, user, path) {
     const funcionario = await primeiro(env.db,
       "SELECT id FROM usuarios WHERE id=? AND perfil='FUNCIONARIO' AND ativo=1 AND excluido=0",id);
     if (!funcionario) throw new Error("Selecione um funcionário ativo.");
-    await executar(env.db, \`
+    await executar(env.db, `
       INSERT INTO almoxarifado_equipe (usuario_id,funcao,ativo,atribuido_por)
       VALUES (?,'ALMOXARIFE',1,?)
       ON CONFLICT(usuario_id) DO UPDATE SET
         funcao='ALMOXARIFE',ativo=1,atribuido_por=excluded.atribuido_por,
         atualizado_em=CURRENT_TIMESTAMP
-    \`,id,Number(user.id));
+    `,id,Number(user.id));
     return "/funcionarios?ok=" + encodeURIComponent("Função de Almoxarife atribuída ao funcionário.");
   }
   if (path === "/almoxarifado/equipe/remover") {
@@ -747,6 +747,9 @@ export async function handleAlmoxarifado(request, env, url) {
         return isApi ? respostaJson({erro:"Origem da solicitação não autorizada."},403) :
           redirecionar("/almoxarifado?erro=" + encodeURIComponent("Origem da solicitação não autorizada."));
       }
+    }
+    if (url.pathname.startsWith("/almoxarifado/equipe/")) {
+      return redirecionar(await processarEquipeAlmoxarifado(request,env,user,url.pathname));
     }
     if (isApi) {
       if (request.method !== "GET" && request.method !== "POST") return respostaJson({erro:"Método não permitido."},405);
