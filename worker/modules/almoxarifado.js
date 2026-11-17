@@ -894,13 +894,17 @@ export function atualizarIdentificacaoVersaoAlmoxarifado(conteudo, pathname) {
 export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
   if (!respostaAlmox || !responseShell || respostaAlmox.status !== 200 || responseShell.status !== 200) return respostaAlmox;
   const [htmlAlmox,htmlShell]=await Promise.all([respostaAlmox.text(),responseShell.text()]);
-  const parte=htmlAlmox.match(/<main class="wrap">([\\s\\S]*?)<\\/main>/i);
-  if (!parte) return respostaAlmox;
-  const mainPattern=/(<main class="container">)([\\s\\S]*?)(<\\/main>)/i;
-  if (!mainPattern.test(htmlShell)) return respostaHtml('<section class="card"><h2>Almoxarifado indisponível</h2><p>Não foi possível montar a área dentro do Fluxo Lab.</p></section>',500);
+  const almoxStart=htmlAlmox.indexOf('<main class="wrap">');
+  const almoxOpenEnd=almoxStart>=0 ? htmlAlmox.indexOf(">",almoxStart)+1 : -1;
+  const almoxClose=almoxOpenEnd>0 ? htmlAlmox.indexOf("</main>",almoxOpenEnd) : -1;
+  if (almoxStart<0 || almoxOpenEnd<=0 || almoxClose<0) return respostaAlmox;
+  const shellStart=htmlShell.indexOf('<main class="container">');
+  const shellOpenEnd=shellStart>=0 ? htmlShell.indexOf(">",shellStart)+1 : -1;
+  const shellClose=shellOpenEnd>0 ? htmlShell.indexOf("</main>",shellOpenEnd) : -1;
+  if (shellStart<0 || shellOpenEnd<=0 || shellClose<0) return respostaHtml('<section class="card"><h2>Almoxarifado indisponível</h2><p>Não foi possível montar a área dentro do Fluxo Lab.</p></section>',500);
   const estilo=`
     <style id="estilo-almoxarifado-integrado">
-      body.fluxo-almoxarifado-aberto .sidebar-nav a[href="/almoxarifado"]{background:rgba(16,139,137,.24)!important;border-color:rgba(32,184,181,.42)!important;color:#fff!important}
+      .sidebar-nav a[href="/almoxarifado"]{background:rgba(16,139,137,.24)!important;border-color:rgba(32,184,181,.42)!important;color:#fff!important}
       .almox-integrado{color:var(--texto);min-width:0}
       .almox-integrado .intro{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:0 0 18px}
       .almox-integrado .intro h1{margin:0 0 4px;color:var(--texto);font-size:26px}
@@ -944,11 +948,15 @@ export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
       .almox-integrado .almox-chat-form{display:grid;gap:9px;border-top:1px solid var(--borda);padding-top:14px}
       @media(max-width:700px){.almox-integrado .intro h1{font-size:22px}.almox-integrado .form-grid{grid-template-columns:1fr}.almox-integrado .almox-chat-msg{max-width:96%}}
     </style>`;
-  const conteudo='<div class="almox-integrado">'+parte[1]+'</div>';
-  let updated=htmlShell.replace(mainPattern,'$1'+estilo+conteudo+'$3');
-  updated=updated.replace(/<title>[\\s\\S]*?<\\/title>/i,'<title>Almoxarifado · Fluxo Lab</title>');
-  updated=updated.replace(/(<div class="topbar-titulo">[\\s\\S]*?<strong>)[\\s\\S]*?(<\\/strong>)/i,'$1Almoxarifado$2');
-  updated=updated.replace(/<body([^>]*)>/i,'<body$1 class="fluxo-almoxarifado-aberto">');
+  const conteudo='<div class="almox-integrado">'+htmlAlmox.slice(almoxOpenEnd,almoxClose)+'</div>';
+  let updated=htmlShell.slice(0,shellOpenEnd)+estilo+conteudo+htmlShell.slice(shellClose);
+  const titleStart=updated.indexOf("<title>");
+  const titleEnd=titleStart>=0 ? updated.indexOf("</title>",titleStart) : -1;
+  if(titleStart>=0 && titleEnd>titleStart) updated=updated.slice(0,titleStart)+"<title>Almoxarifado · Fluxo Lab</title>"+updated.slice(titleEnd+8);
+  const topbarStart=updated.indexOf('<div class="topbar-titulo">');
+  const strongStart=topbarStart>=0 ? updated.indexOf("<strong>",topbarStart) : -1;
+  const strongEnd=strongStart>=0 ? updated.indexOf("</strong>",strongStart) : -1;
+  if(strongStart>=0 && strongEnd>strongStart) updated=updated.slice(0,strongStart+8)+"Almoxarifado"+updated.slice(strongEnd);
   const headers=new Headers(responseShell.headers);
   headers.delete("content-length");headers.delete("content-encoding");
   headers.set("cache-control","private, no-store");
