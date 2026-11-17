@@ -16,9 +16,8 @@ function gerenteAlmox(user) {
   return ["ADMINISTRADOR", "COORDENADOR"].includes(String(user?.perfil || "").toUpperCase());
 }
 
-export async function podeGerenciarAlmox(env, user) {
-  if (!user) return false;
-  if (gerenteAlmox(user)) return true;
+export async function ehFuncionarioAlmoxarifado(env, user) {
+  if (!user || String(user.perfil || "").toUpperCase() !== "FUNCIONARIO") return false;
   const vinculo = await primeiro(env.db, `
     SELECT 1
     FROM almoxarifado_equipe ae
@@ -28,6 +27,27 @@ export async function podeGerenciarAlmox(env, user) {
     LIMIT 1
   `, Number(user.id));
   return Boolean(vinculo);
+}
+
+export function deveRedirecionarAlmoxarife(isAlmoxarife, pathname, method) {
+  if (!isAlmoxarife) return false;
+  const path = String(pathname || "/");
+  const verb = String(method || "GET").toUpperCase();
+  if (path === "/almoxarifado" || path.startsWith("/almoxarifado/")) return false;
+  if (path === "/logout" && verb === "POST") return false;
+  if (["GET", "HEAD"].includes(verb) && [
+    "/service-worker.js",
+    "/manifest.webmanifest",
+    "/icon-192.png",
+    "/icon-512.png"
+  ].includes(path)) return false;
+  return true;
+}
+
+export async function podeGerenciarAlmox(env, user) {
+  if (!user) return false;
+  if (gerenteAlmox(user)) return true;
+  return ehFuncionarioAlmoxarifado(env, user);
 }
 
 export function escaparHtmlAlmox(value) {
@@ -444,7 +464,7 @@ function formularioInventario(lotes) {
     ).join("") + "</tbody></table></div>";
 }
 
-function layoutAlmox(user, view, content, gerente, notice = "") {
+function layoutAlmox(user, view, content, gerente, notice = "", almoxarifeExclusivo = false) {
   const links = [["dashboard","Painel"],["itens","Itens"],["entrada","Entrada"],["requisicoes","Requisições"],["lotes","Lotes"],["movimentos","Movimentos"],["inventario","Inventário"]];
   const nav = links.map(([key,label]) => '<a class="' + (view === key ? "ativo" : "") + '" href="/almoxarifado?view=' + key + '">' + label + "</a>").join("");
   const css = [
@@ -452,7 +472,7 @@ function layoutAlmox(user, view, content, gerente, notice = "") {
     "*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,sans-serif}",
     ".top{background:#fff;border-bottom:1px solid var(--line);padding:18px max(22px,calc((100% - 1240px)/2));display:flex;align-items:center;justify-content:space-between;gap:16px}",
     ".brand{display:flex;align-items:center;gap:12px}.logo{width:40px;height:40px;border-radius:12px;background:var(--blue2);color:var(--blue);display:grid;place-items:center;font-size:21px;font-weight:800}.brand strong{display:block;font-size:18px}.brand small{color:var(--muted)}",
-    ".top a{color:var(--blue);text-decoration:none;font-weight:650}.wrap{max-width:1240px;margin:24px auto;padding:0 22px}.intro{display:flex;justify-content:space-between;gap:16px;align-items:end;margin-bottom:18px}.intro h1{font-size:26px;margin:0 0 4px}.intro p{margin:0;color:var(--muted)}",
+    ".top a{color:var(--blue);text-decoration:none;font-weight:650}.acoes-topo{display:flex;align-items:center;justify-content:flex-end;gap:12px;flex-wrap:wrap}.form-sair{margin:0}.form-sair button{padding:8px 12px}.wrap{max-width:1240px;margin:24px auto;padding:0 22px}.intro{display:flex;justify-content:space-between;gap:16px;align-items:end;margin-bottom:18px}.intro h1{font-size:26px;margin:0 0 4px}.intro p{margin:0;color:var(--muted)}",
     "nav{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 20px;background:#fff;border:1px solid var(--line);border-radius:14px;padding:7px}nav a{padding:9px 13px;text-decoration:none;color:#45536a;border-radius:9px;font-weight:650}nav a.ativo{background:var(--blue2);color:var(--blue)}",
     ".grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin-bottom:18px}.card,.panel{background:#fff;border:1px solid var(--line);border-radius:15px;padding:17px;box-shadow:0 2px 10px #182a4408}.card small{display:block;color:var(--muted)}.card strong{display:block;font-size:26px;margin-top:5px}.panel{margin-bottom:17px}.panel h2{margin:0 0 13px;font-size:18px}.muted{color:var(--muted)}",
     ".form-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.form-grid label{display:flex;flex-direction:column;gap:5px;font-weight:650;color:#35425a}.form-grid .largo{grid-column:span 2}.form-grid input,.form-grid select,.linha-form input,.linha-form select{min-width:0;width:100%;border:1px solid #cfd8e6;border-radius:8px;padding:10px;background:#fff;color:var(--ink);font:inherit}.form-grid .checkbox{display:flex;flex-direction:row;align-items:center;gap:8px}.checkbox input{width:auto}.acoes{grid-column:1/-1;display:flex;justify-content:flex-end}",
@@ -464,9 +484,13 @@ function layoutAlmox(user, view, content, gerente, notice = "") {
     "@media(max-width:800px){.grid{grid-template-columns:repeat(2,minmax(0,1fr))}.form-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.top{padding:14px 18px}.wrap{padding:0 14px}.intro h1{font-size:22px}}@media(max-width:520px){.grid{grid-template-columns:1fr 1fr;gap:8px}.card{padding:12px}.form-grid{grid-template-columns:1fr}.form-grid .largo{grid-column:span 1}.intro{align-items:start;flex-direction:column}.top{align-items:flex-start;flex-direction:column}.detail{grid-template-columns:1fr}}"
   ].join("");
   const titulo = (links.find((entry) => entry[0] === view) || ["","Almoxarifado"])[1];
+  const acoesTopo = (almoxarifeExclusivo
+    ? '<span class="status ok">Área exclusiva · Almoxarifado</span>'
+    : '<a href="/">Voltar ao Fluxo Lab</a>') +
+    '<span>' + escaparHtmlAlmox(user.nome || "Usuário") + '</span>' +
+    '<form method="POST" action="/logout" class="form-sair"><button type="submit" class="secundario">Sair</button></form>';
   return "<!doctype html><html lang=\"pt-BR\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>Almoxarifado · Fluxo Lab</title><style>" +
-    css + "</style></head><body><header class=\"top\"><div class=\"brand\"><div class=\"logo\">▤</div><div><strong>Fluxo Lab · Almoxarifado</strong><small>Controle rastreável de materiais</small></div></div><div><a href=\"/\">Voltar ao Fluxo Lab</a> · " +
-    escaparHtmlAlmox(user.nome || "Usuário") + "</div></header><main class=\"wrap\"><div class=\"intro\"><div><h1>" + titulo +
+    css + "</style></head><body><header class=\"top\"><div class=\"brand\"><div class=\"logo\">▤</div><div><strong>Fluxo Lab · Almoxarifado</strong><small>Controle rastreável de materiais</small></div></div><div class=\"acoes-topo\">" + acoesTopo + "</div></header><main class=\"wrap\"><div class=\"intro\"><div><h1>" + titulo +
     "</h1><p>O saldo é calculado pelo histórico de movimentos. Não existe edição manual de estoque.</p></div>" +
     (gerente ? "<span class=\"status ok\">Gestão de estoque</span>" : "<span class=\"status\">Solicitante</span>") +
     "</div><nav aria-label=\"Navegação do almoxarifado\">" + nav + "</nav>" +
@@ -475,7 +499,8 @@ function layoutAlmox(user, view, content, gerente, notice = "") {
 
 async function renderView(env, user, url) {
   const view = String(url.searchParams.get("view") || "dashboard");
-  const gerente = await podeGerenciarAlmox(env,user);
+  const almoxarifeExclusivo = await ehFuncionarioAlmoxarifado(env,user);
+  const gerente = gerenteAlmox(user) || almoxarifeExclusivo;
   const itens = await dadosItens(env,url.searchParams.get("q"));
   const lotes = await dadosLotes(env);
   let content = "";
@@ -537,7 +562,7 @@ async function renderView(env, user, url) {
   } else {
     content = '<section class="panel"><p>Área não encontrada.</p></section>';
   }
-  return respostaHtml(layoutAlmox(user,view,content,gerente,notice));
+  return respostaHtml(layoutAlmox(user,view,content,gerente,notice,almoxarifeExclusivo));
 }
 
 async function processarFormulario(request, env, user) {
@@ -771,9 +796,13 @@ export async function handleAlmoxarifado(request, env, url) {
 export function atualizarIdentificacaoVersaoAlmoxarifado(conteudo, pathname) {
   const texto = String(conteudo ?? "");
   if (pathname === "/service-worker.js") {
-    return texto.replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.10.0");
+    return texto
+      .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.11.0")
+      .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.11.0");
   }
-  return texto.replaceAll("V5.9.0", "V5.10.0");
+  return texto
+    .replaceAll("V5.9.0", "V5.11.0")
+    .replaceAll("V5.10.0", "V5.11.0");
 }
 
 export async function injetarLinkAlmoxarifado(response, request) {
