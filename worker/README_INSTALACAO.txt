@@ -1,6 +1,4 @@
-FLUXO LAB WORKER V5.8.8 — FONTE OFICIAL DE PRODUÇÃO
-
-Este diretório é a única fonte de código do Worker oficial.
+FLUXO LAB WORKER V5.9.0 — FONTE OFICIAL
 
 Worker: fluxo-lab
 Endereço: https://app.markfree.com.br/
@@ -8,21 +6,15 @@ Entrada: index.js
 Aplicação principal: legacy.js
 Configuração Cloudflare: cloudflare.config.ts
 
-WEB, WINDOWS E ANDROID ACESSAM O MESMO WORKER. Os clientes instaláveis não possuem backend nem banco independente.
+WEB, WINDOWS E ANDROID ACESSAM O MESMO WORKER. As atualizações de telas e funcionalidades chegam aos três clientes pelo sistema central. Não é necessário gerar novo EXE ou APK para esta atualização.
 
-DESENVOLVIMENTO
-1. Trabalhe nesta pasta worker/.
-2. Execute npm install --no-package-lock e npm run check.
-3. Na raiz do repositório, execute os testes descritos no README.md.
-4. Abra Pull Request para main.
-5. Após aprovação e merge, Cloudflare Workers Builds publica o Worker automaticamente.
+NOVIDADE V5.9.0
+Minhas anotações agora permite negrito e marca-texto amarelo, vermelho, verde e azul. A formatação permanece após salvar e reabrir. Anotações antigas continuam compatíveis. Nenhuma migração D1 é necessária.
 
 PUBLICAÇÃO
-O comando de deploy é npm run deploy (cf deploy --mode production). Não execute manualmente. O pipeline oficial é Cloudflare Workers Builds, branch main, root directory /worker.
+A publicação é feita exclusivamente pelo Pull Request para main e pelo GitHub Actions após os testes. Não publique manualmente no painel Cloudflare.
 
-RECURSOS VINCULADOS
+RECURSOS PRESERVADOS
 D1: fluxo-lab-db.
 R2: fluxo-lab-downloads, fluxo-lab-importacoes, fluxo-lab-stl.
 Workers AI: AI.
-
-Não alterar bindings, domínio, recursos de produção ou schema D1 sem revisão humana. Os snapshots históricos estão em releases/ e não devem ser editados.
