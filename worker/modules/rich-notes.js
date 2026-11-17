@@ -29,7 +29,8 @@ function decodificarEntidadesNotaV590(value) {
 function textoVisivelNotaV590(html) {
   const texto = String(html)
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/?div\s*>/gi, "\n")
+    .replace(/<\/div\s*>\s*<div\s*>/gi, "\n")
+    .replace(/<\/?div\s*>/gi, "")
     .replace(/<\/?strong\s*>/gi, "")
     .replace(/<mark\s+data-cor="(?:yellow|red|green|blue)">/gi, "")
     .replace(/<\/mark>/gi, "")
@@ -49,7 +50,6 @@ export function sanitizeRichNoteHtml(input) {
       html += "&lt;";
       continue;
     }
-
     if (!token.startsWith("<")) {
       html += escaparTextoNotaV590(token);
       continue;

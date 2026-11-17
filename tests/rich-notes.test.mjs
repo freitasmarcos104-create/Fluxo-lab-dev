@@ -21,10 +21,7 @@ test('negrito e marca-texto usam somente tags e cores autorizadas', () => {
   const result = sanitizeRichNoteHtml(
     '<b>URGENTE</b> <mark data-cor="red" style="color: black" onclick="alert(1)">PPR</mark>'
   );
-  assert.equal(
-    result.html,
-    '<strong>URGENTE</strong> <mark data-cor="red">PPR</mark>'
-  );
+  assert.equal(result.html, '<strong>URGENTE</strong> <mark data-cor="red">PPR</mark>');
   assert.equal(result.text, 'URGENTE PPR');
   assert.equal(result.length, 11);
 });
@@ -40,6 +37,12 @@ test('remove scripts e atributos sem descartar o texto comum', () => {
 test('cores desconhecidas caem no amarelo padrão', () => {
   const result = sanitizeRichNoteHtml('<mark data-cor="purple">Atenção</mark>');
   assert.equal(result.html, '<mark data-cor="yellow">Atenção</mark>');
+});
+
+test('blocos de parágrafo contam apenas as quebras de linha entre blocos', () => {
+  const result = sanitizeRichNoteHtml('<div>Alpha</div><div>Beta</div>');
+  assert.equal(result.text, 'Alpha\nBeta');
+  assert.equal(result.length, 10);
 });
 
 test('notas antigas em texto puro continuam legíveis e escapadas', () => {
