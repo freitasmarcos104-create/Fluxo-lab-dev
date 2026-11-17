@@ -977,13 +977,13 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
     const user = env?.db ? await obterUsuarioLogado(request,env) : null;
     const almoxarife = await ehFuncionarioAlmoxarifado(env,user);
     const gestor = gerenteAlmox(user);
-    const podeVerLink = !user || !["CADASTRO"].includes(String(user.perfil || "").toUpperCase());
+    const podeVerLink = !user || String(user.perfil || "").toUpperCase() !== "CADASTRO";
     const link = '<a href="/almoxarifado" class="almoxarifado-nav-link"><span class="nav-icone">▤</span><span>Almoxarifado</span></a>';
     const chat = '<a href="/almoxarifado/chat"><span class="nav-icone">💬</span><span>Chat da equipe</span></a>';
 
     if (almoxarife) {
       let bloco = 0;
-      updated = updated.replace(/(<div class="nav-bloco-itens-v325">)([\\s\\S]*?)(<\\/div>)/g,(whole,open,inner,close) => {
+      updated = updated.replace(/(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/g,(whole,open,inner,close) => {
         bloco++;
         if (bloco === 1) return open + link + close;
         if (bloco === 2) {
@@ -1002,15 +1002,15 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
         }
         return whole;
       });
-      updated=updated.replace(/<a\\b[^>]*href="\\/digital\\/chat-equipe"[^>]*>[\\s\\S]*?<\\/a>/gi,"");
+      updated = updated.replace(/<a\b[^>]*href="\/digital\/chat-equipe"[^>]*>[\s\S]*?<\/a>/gi,"");
     } else if (podeVerLink && !updated.includes('href="/almoxarifado"')) {
-      const re=/(<div class="nav-bloco-itens-v325">)([\\s\\S]*?)(<\\/div>)/;
-      updated=updated.replace(re,(whole,open,inner,close)=>open+inner+link+close);
+      const re = /(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/;
+      updated = updated.replace(re,(whole,open,inner,close)=>open+inner+link+close);
     }
 
     if (gestor && !almoxarife && !updated.includes('href="/almoxarifado/chat"')) {
       let seen=0;
-      updated=updated.replace(/(<div class="nav-bloco-itens-v325">)([\\s\\S]*?)(<\\/div>)/g,(whole,open,inner,close)=>{
+      updated = updated.replace(/(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/g,(whole,open,inner,close)=>{
         seen++;
         if(seen===2)return open+inner+chat+close;
         return whole;
