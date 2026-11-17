@@ -242,7 +242,7 @@ async function dadosMovimentos(env) {
 async function dadosPainel(env) {
   const results = await Promise.all([
     primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_itens WHERE ativo=1"),
-    primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_saldos_itens WHERE saldo_total<quantidade_minima"),
+    primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_saldos_itens WHERE saldo_disponivel<quantidade_minima"),
     primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_status_requisicoes WHERE status IN ('ABERTA','PARCIAL')"),
     dadosLotes(env)
   ]);
@@ -295,7 +295,7 @@ function renderTabelaLotes(lotes, gerente) {
   return '<div class="tabela-wrap"><table><thead><tr><th>Item</th><th>Lote</th><th>Validade</th><th>Local</th><th>Saldo</th><th>Situação</th>' +
     (gerente ? "<th>Controle</th>" : "") + '</tr></thead><tbody>' +
     lotes.map((l) => '<tr><td>' + escaparHtmlAlmox(l.codigo + " · " + l.nome) + '</td><td>' +
-      escaparHtmlAlmox(l.controla_lote ? l.codigo_lote : "Interno") + '</td><td>' + escaparHtmlAlmox(l.validade || "—") +
+      escaparHtmlAlmox(l.codigo_lote + (l.controla_lote ? "" : " · interno")) + '</td><td>' + escaparHtmlAlmox(l.validade || "—") +
       '</td><td>' + escaparHtmlAlmox(l.localizacao) + '</td><td class="numero">' + Number(l.saldo || 0) + " " +
       escaparHtmlAlmox(l.unidade) + '</td><td><span class="status ' + classeStatus(l.status_exibicao) + '">' + escaparHtmlAlmox(l.status_exibicao) +
       "</span></td>" + (gerente ? '<td><form class="linha-form" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="status_lote">' +
@@ -322,7 +322,7 @@ function renderRequisicoes(requisicoes, lotes, gerente) {
     const restante = Math.max(0, Number(r.quantidade_solicitada) - Number(r.quantidade_atendida));
     const disponiveis = lotes.filter((l) => Number(l.item_id) === Number(r.item_id) && Number(l.saldo) > 0 && l.status_exibicao === "DISPONIVEL");
     const opcoes = disponiveis.map((l) => '<option value="' + l.lote_id + '">' + escaparHtmlAlmox(
-      (l.controla_lote ? l.codigo_lote : "Lote interno") + " · vence " + (l.validade || "sem validade") + " · saldo " + l.saldo + " " + l.unidade
+      l.codigo_lote + (l.controla_lote ? "" : " · interno") + " · vence " + (l.validade || "sem validade") + " · saldo " + l.saldo + " " + l.unidade
     ) + "</option>").join("");
     return '<article class="requisicao"><div><strong>Requisição #' + r.requisicao_id + " · " + escaparHtmlAlmox(r.item_nome) +
       '</strong><span class="status ' + classeStatus(r.status) + '">' + escaparHtmlAlmox(r.status) + "</span></div><p>Solicitante: " +
