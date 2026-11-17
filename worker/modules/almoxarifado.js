@@ -768,18 +768,33 @@ export async function handleAlmoxarifado(request, env, url) {
   }
 }
 
+export function atualizarIdentificacaoVersaoAlmoxarifado(conteudo, pathname) {
+  const texto = String(conteudo ?? "");
+  if (pathname === "/service-worker.js") {
+    return texto.replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.10.0");
+  }
+  return texto.replaceAll("V5.9.0", "V5.10.0");
+}
+
 export async function injetarLinkAlmoxarifado(response, request) {
   if (!response || response.status !== 200 || request.method === "HEAD") return response;
+  const url = new URL(request.url);
   const contentType = response.headers.get("content-type") || "";
-  if (!contentType.includes("text/html")) return response;
+  const ehHtml = contentType.includes("text/html");
+  const ehServiceWorker = url.pathname === "/service-worker.js";
+  if (!ehHtml && !ehServiceWorker) return response;
+
   const original = await response.text();
-  if (!original.includes('class="sidebar-nav"') || original.includes('href="/almoxarifado"')) {
-    return new Response(original,{status:response.status,statusText:response.statusText,headers:response.headers});
+  let updated = atualizarIdentificacaoVersaoAlmoxarifado(original, url.pathname);
+  if (ehHtml && updated.includes('class="sidebar-nav"') && !updated.includes('href="/almoxarifado"')) {
+    const link = '<a href="/almoxarifado"><span class="nav-icone">▤</span><span>Almoxarifado</span></a>';
+    updated = updated.replace(/(<nav\b[^>]*class="sidebar-nav"[^>]*>[\s\S]*?)(<\/nav>)/i, "$1" + link + "$2");
   }
-  const link = '<a href="/almoxarifado"><span class="nav-icone">▤</span><span>Almoxarifado</span></a>';
-  const updated = original.replace(/(<nav\b[^>]*class="sidebar-nav"[^>]*>[\s\S]*?)(<\/nav>)/i,"$1" + link + "$2");
+
   const headers = new Headers(response.headers);
-  headers.delete("content-length");
-  headers.delete("content-encoding");
-  return new Response(updated,{status:response.status,statusText:response.statusText,headers});
+  if (updated !== original) {
+    headers.delete("content-length");
+    headers.delete("content-encoding");
+  }
+  return new Response(updated, { status: response.status, statusText: response.statusText, headers });
 }
