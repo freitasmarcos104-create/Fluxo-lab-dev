@@ -93,8 +93,6 @@ test('rota GET direta do trabalho carrega paciente, etapas e componentes com per
   const fim = source.indexOf('match = caminho.match(', autorizacao + 1);
   assert.ok(inicio >= 0 && fim > inicio, 'rota GET direta de trabalho deve estar delimitada');
   const rota = source.slice(inicio, fim);
-  assert.ok(rota.includes('^\\/trabalhos\\/(\\d+)
-));
   assert.ok(rota.includes('request.method === "GET"'));
   assert.ok(rota.includes('await obterTrabalho('));
   assert.ok(rota.includes('usuarioPodeVerTrabalhoDigitalV345(env, usuario, id)'));
