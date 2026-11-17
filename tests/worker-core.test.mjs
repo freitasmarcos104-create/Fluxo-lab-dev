@@ -103,7 +103,7 @@ test('rota GET direta do trabalho carrega paciente, etapas e componentes com per
 });
 
 
-import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, setoresDisponiveisAlmox, podeGerenciarAlmox, ehFuncionarioAlmoxarifado, deveRedirecionarAlmoxarife, atualizarIdentificacaoVersaoAlmoxarifado, injetarLinkAlmoxarifado } from "../worker/modules/almoxarifado.js";
+import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, setoresDisponiveisAlmox, podeGerenciarAlmox, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife, atualizarIdentificacaoVersaoAlmoxarifado, injetarLinkAlmoxarifado } from "../worker/modules/almoxarifado.js";
 
 test("Almoxarifado escapa texto antes de inserir dados no HTML", () => {
   assert.equal(escaparHtmlAlmox("<script>&\"'"), "&lt;script&gt;&amp;&quot;&#39;");
@@ -161,15 +161,15 @@ test("requisições respeitam os setores vinculados ao usuário", () => {
 });
 
 test("funcionário Almoxarife entra no painel exclusivo e não acessa páginas gerais", () => {
-  assert.equal(deveRedirecionarAlmoxarife(true, "/", "GET"), true);
-  assert.equal(deveRedirecionarAlmoxarife(true, "/funcionarios", "GET"), true);
-  assert.equal(deveRedirecionarAlmoxarife(true, "/api/trabalhos", "GET"), true);
-  assert.equal(deveRedirecionarAlmoxarife(true, "/almoxarifado", "GET"), false);
-  assert.equal(deveRedirecionarAlmoxarife(true, "/almoxarifado/api/itens", "GET"), false);
-  assert.equal(deveRedirecionarAlmoxarife(true, "/logout", "POST"), false);
-  assert.equal(deveRedirecionarAlmoxarife(true, "/service-worker.js", "GET"), false);
-  assert.equal(deveRedirecionarAlmoxarife(true, "/manifest.webmanifest", "GET"), false);
-  assert.equal(deveRedirecionarAlmoxarife(false, "/funcionarios", "GET"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/", "GET"), true);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/funcionarios", "GET"), true);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/api/trabalhos", "GET"), true);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/almoxarifado", "GET"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/almoxarifado/api/itens", "GET"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/logout", "POST"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/service-worker.js", "GET"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(true, "/manifest.webmanifest", "GET"), false);
+  assert.equal(deveBloquearRotaAlmoxarife(false, "/funcionarios", "GET"), false);
 });
 
 test("topo exclusivo do Almoxarifado não oferece retorno às funções gerais e mantém Sair", async () => {
@@ -210,7 +210,7 @@ test("conta de almoxarife usa área independente e não ganha acesso de produç�
   assert.match(source, /processarEquipeAlmoxarifado/);
 });
 
-test("interface identifica a versão 5.10.0 nas páginas HTML", () => {
+test("interface identifica a versão 5.11.0 nas páginas HTML", () => {
   const html = '<title>Fluxo Lab V5.9.0</title><span>V5.10.0</span>';
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(html, "/funcionarios"),
@@ -218,7 +218,7 @@ test("interface identifica a versão 5.10.0 nas páginas HTML", () => {
   );
 });
 
-test("service worker recebe uma chave de cache nova na V5.10.0", () => {
+test("service worker recebe uma chave de cache nova na V5.11.0", () => {
   const source = "const FLUXO_CACHE='fluxo-lab-v5.9.0';const OLD='fluxo-lab-v5.10.0';";
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(source, "/service-worker.js"),
@@ -244,6 +244,6 @@ test("injeta cache novo no service worker sem alterar outros scripts", async () 
     new Response(body, {status:200,headers:{"content-type":"application/javascript; charset=utf-8"}}),
     new Request("https://app.markfree.com.br/service-worker.js")
   );
-  assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.10.0';");
+  assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.11.0';");
 });
 

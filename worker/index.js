@@ -2,7 +2,7 @@
 // O Worker legado continua responsável por toda a aplicação existente.
 // O Almoxarifado é interceptado aqui e compartilha autenticação, D1 e deploy oficiais.
 import legado from "./legacy.js";
-import { handleAlmoxarifado, injetarLinkAlmoxarifado, injetarGestaoEquipeAlmoxarifado, ehFuncionarioAlmoxarifado, deveRedirecionarAlmoxarife } from "./modules/almoxarifado.js";
+import { handleAlmoxarifado, injetarLinkAlmoxarifado, injetarGestaoEquipeAlmoxarifado, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife } from "./modules/almoxarifado.js";
 import { obterUsuarioLogado } from "./core/auth.js";
 
 export default {
@@ -18,7 +18,17 @@ export default {
     // e não podem acessar as páginas ou APIs gerais do laboratório.
     const usuario = await obterUsuarioLogado(request, env);
     const almoxarife = await ehFuncionarioAlmoxarifado(env, usuario);
-    if (deveRedirecionarAlmoxarife(almoxarife, url.pathname, request.method)) {
+    if (deveBloquearRotaAlmoxarife(almoxarife, url.pathname, request.method)) {
+      if (url.pathname.includes("/api/")) {
+        return new Response(JSON.stringify({ erro: "Acesso restrito ao setor Almoxarifado." }), {
+          status: 403,
+          headers: {
+            "Content-Type": "application/json; charset=utf-8",
+            "Cache-Control": "no-store, max-age=0",
+            "X-Content-Type-Options": "nosniff"
+          }
+        });
+      }
       return new Response(null, {
         status: 302,
         headers: {

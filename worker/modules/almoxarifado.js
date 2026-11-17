@@ -29,7 +29,7 @@ export async function ehFuncionarioAlmoxarifado(env, user) {
   return Boolean(vinculo);
 }
 
-export function deveRedirecionarAlmoxarife(isAlmoxarife, pathname, method) {
+export function deveBloquearRotaAlmoxarife(isAlmoxarife, pathname, method) {
   if (!isAlmoxarife) return false;
   const path = String(pathname || "/");
   const verb = String(method || "GET").toUpperCase();
