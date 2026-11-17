@@ -312,7 +312,7 @@ test("a atualização conserva apenas um ponto de entrada e integra o shell ofic
   const source = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
   assert.match(source, /integrarTelaAlmoxarifado/);
   assert.match(source, /new URL\("\/meu-perfil", request.url\)/);
-  assert.match(source, /injetarLinkAlmoxarifado\(response, request, env\)/);
+  assert.match(source, /injetarLinkAlmoxarifado\(espacoColaborador, request, env\)/);
 });
 
 test("injeta cache novo no service worker sem alterar outros scripts", async () => {
