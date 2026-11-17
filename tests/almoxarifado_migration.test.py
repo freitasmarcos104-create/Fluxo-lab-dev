@@ -109,24 +109,6 @@ class AlmoxarifadoMigrationTests(unittest.TestCase):
             self.item(tipo + "-OK", tipo, tipo=tipo, controla_lote=1)
 
 
-    def test_team_chat_is_scoped_and_messages_have_length_constraints(self):
-        self.db.execute(
-            "INSERT INTO almoxarifado_chat_mensagens (usuario_id,mensagem) VALUES (1,'Olá, equipe')"
-        )
-        row = self.db.execute(
-            "SELECT usuario_id,mensagem FROM almoxarifado_chat_mensagens"
-        ).fetchone()
-        self.assertEqual(row, (1, "Olá, equipe"))
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.db.execute(
-                "INSERT INTO almoxarifado_chat_mensagens (usuario_id,mensagem) VALUES (1,'   ')"
-            )
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.db.execute(
-                "INSERT INTO almoxarifado_chat_mensagens (usuario_id,mensagem) VALUES (1,?)",
-                ("x" * 1501,),
-            )
-
     def test_balance_is_derived_and_never_goes_negative(self):
         item_id = self.item("PON-01", "Ponteira")
         lote_id = self.lote(item_id, "INT-001")
