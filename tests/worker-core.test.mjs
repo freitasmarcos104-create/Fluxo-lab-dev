@@ -103,7 +103,7 @@ test('rota GET direta do trabalho carrega paciente, etapas e componentes com per
 });
 
 
-import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado } from "../worker/modules/almoxarifado.js";
+import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, setoresDisponiveisAlmox } from "../worker/modules/almoxarifado.js";
 
 test("Almoxarifado escapa texto antes de inserir dados no HTML", () => {
   assert.equal(escaparHtmlAlmox("<script>&\"'"), "&lt;script&gt;&amp;&quot;&#39;");
@@ -146,4 +146,16 @@ test("ponto de entrada encaminha somente o Almoxarifado e preserva o Worker lega
   assert.match(source, /return handleAlmoxarifado/);
   assert.ok(source.includes("legado.fetch(request, env, ctx)"));
   assert.match(source, /injetarLinkAlmoxarifado/);
+});
+
+test("requisições respeitam os setores vinculados ao usuário", () => {
+  assert.deepEqual(
+    setoresDisponiveisAlmox({ perfil: "FUNCIONARIO", setores_v31: "DIGITAL:CAD/CAM|DIGITAL:IMPRESSAO" }),
+    ["DIGITAL:CAD/CAM", "DIGITAL:IMPRESSAO"]
+  );
+  assert.deepEqual(
+    setoresDisponiveisAlmox({ perfil: "FUNCIONARIO", setor_convencional: "ACRILIZACAO" }),
+    ["CONVENCIONAL:ACRILIZACAO"]
+  );
+  assert.ok(setoresDisponiveisAlmox({ perfil: "ADMINISTRADOR" }).includes("CONVENCIONAL:QUALIDADE"));
 });
