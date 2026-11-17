@@ -103,7 +103,7 @@ test('rota GET direta do trabalho carrega paciente, etapas e componentes com per
 });
 
 
-import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, integrarTelaAlmoxarifado, setoresDisponiveisAlmox, podeGerenciarAlmox, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife, atualizarIdentificacaoVersaoAlmoxarifado, injetarLinkAlmoxarifado } from "../worker/modules/almoxarifado.js";
+import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, integrarTelaAlmoxarifado, renderEspacoColaboradorAlmoxarife, setoresDisponiveisAlmox, podeGerenciarAlmox, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife, atualizarIdentificacaoVersaoAlmoxarifado, injetarLinkAlmoxarifado } from "../worker/modules/almoxarifado.js";
 
 test("Almoxarifado escapa texto antes de inserir dados no HTML", () => {
   assert.equal(escaparHtmlAlmox("<script>&\"'"), "&lt;script&gt;&amp;&quot;&#39;");
@@ -246,6 +246,24 @@ test("injeta menu e versão atualizada no HTML servido pelo Worker legado", asyn
 });
 
 
+
+test("Espaço do Colaborador do Almoxarife preserva ferramentas pessoais sem mostrar produção", () => {
+  const html = renderEspacoColaboradorAlmoxarife({nome:"Yan"});
+  assert.match(html, /Chat da equipe/);
+  assert.match(html, /Comunicação e solicitações/);
+  assert.match(html, /Agenda e tarefas/);
+  assert.match(html, /Minhas anotações/);
+  assert.match(html, /Meu perfil/);
+  assert.match(html, /Universidade Fluxo Lab/);
+  assert.match(html, /Minha coleção de emblemas/);
+  assert.doesNotMatch(html, /Minha produção|Minha evolução|Liderança da produção|\/minha-producao|\/minha-evolucao|\/lideranca-producao/);
+});
+
+test("o Worker substitui o Meu Espaço produtivo pelo central do Almoxarife", async () => {
+  const source = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
+  assert.match(source, /adaptarMeuEspacoAlmoxarife\(response, request, env\)/);
+});
+
 test("página do Almoxarifado usa o layout e o menu lateral nativos do Fluxo Lab", async () => {
   const almox = new Response('<html><body><main class="wrap"><div class="intro"><h1>Consultar materiais</h1></div><nav aria-label="Navegação do almoxarifado"><a href="/almoxarifado?view=itens">Consultar materiais</a></nav><section class="panel">Catálogo</section></main></body></html>', {
     status:200,headers:{"content-type":"text/html; charset=utf-8"}
@@ -278,7 +296,7 @@ test("o menu Almoxarifado separa a área operacional do espaço do colaborador",
   assert.match(source, /Chat da equipe/);
   assert.match(source, /Comunicação e solicitações/);
   assert.match(source, /if \(bloco === 1\) return open \+ link \+ close/);
-  assert.match(source, /if \(bloco === 2\)/);
+  assert.match(source, /if \(bloco === 2\)/);\n  assert.match(source, /nav-bloco-v325.*open/);
 });
 
 test("o Almoxarifado possui chat próprio e não usa o chat da produção Digital", async () => {
