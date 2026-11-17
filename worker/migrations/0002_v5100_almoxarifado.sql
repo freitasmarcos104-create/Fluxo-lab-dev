@@ -70,6 +70,7 @@ CREATE TABLE almoxarifado_movimentos (
   usuario_id INTEGER NOT NULL,
   criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   CHECK (tipo NOT IN ('AJUSTE_POSITIVO','AJUSTE_NEGATIVO') OR length(trim(COALESCE(motivo,''))) >= 4),
+  CHECK (tipo NOT IN ('PERDA','VENCIMENTO') OR length(trim(COALESCE(motivo,''))) >= 4),
   CHECK (tipo <> 'TRANSFERENCIA' OR (length(trim(COALESCE(local_origem,''))) > 0 AND length(trim(COALESCE(local_destino,''))) > 0 AND local_origem <> local_destino)),
   CHECK (tipo = 'SAIDA' OR requisicao_item_id IS NULL),
   FOREIGN KEY (item_id) REFERENCES almoxarifado_itens(id) ON DELETE RESTRICT,
@@ -111,7 +112,7 @@ BEGIN
       SELECT 1 FROM almoxarifado_lotes
       WHERE id=NEW.lote_id AND (status='VENCIDO' OR (validade IS NOT NULL AND validade < date('now')))
     ) THEN RAISE(ABORT, 'Baixa por vencimento exige lote vencido.')
-    WHEN NEW.tipo<>'VENCIMENTO' AND NOT EXISTS (
+    WHEN NEW.tipo IN ('SAIDA','PERDA') AND NOT EXISTS (
       SELECT 1 FROM almoxarifado_lotes
       WHERE id=NEW.lote_id AND status='DISPONIVEL' AND (validade IS NULL OR validade >= date('now'))
     ) THEN RAISE(ABORT, 'Lote vencido, em quarentena ou bloqueado não pode sair.')
@@ -122,6 +123,26 @@ BEGIN
         ELSE 0 END)
       FROM almoxarifado_movimentos WHERE lote_id=NEW.lote_id
     ),0) < NEW.quantidade THEN RAISE(ABORT, 'Saldo insuficiente no lote.')
+  END;
+END;
+
+CREATE TRIGGER trg_almox_transferencia_integral
+BEFORE INSERT ON almoxarifado_movimentos
+WHEN NEW.tipo='TRANSFERENCIA'
+BEGIN
+  SELECT CASE
+    WHEN NOT EXISTS (
+      SELECT 1 FROM almoxarifado_lotes
+      WHERE id=NEW.lote_id AND status='DISPONIVEL'
+        AND (validade IS NULL OR validade >= date('now'))
+    ) THEN RAISE(ABORT, 'Somente lote disponível e válido pode ser transferido.')
+    WHEN ABS(NEW.quantidade - COALESCE((
+      SELECT SUM(CASE
+        WHEN tipo IN ('ENTRADA','AJUSTE_POSITIVO') THEN quantidade
+        WHEN tipo IN ('SAIDA','PERDA','VENCIMENTO','AJUSTE_NEGATIVO') THEN -quantidade
+        ELSE 0 END)
+      FROM almoxarifado_movimentos WHERE lote_id=NEW.lote_id
+    ),0)) > 0.000001 THEN RAISE(ABORT, 'A transferência deve mover o saldo integral do lote.')
   END;
 END;
 
