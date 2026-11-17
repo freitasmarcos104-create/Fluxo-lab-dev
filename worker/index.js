@@ -2,7 +2,7 @@
 // O Worker legado continua responsável por toda a aplicação existente.
 // O Almoxarifado é interceptado aqui e compartilha autenticação, D1 e deploy oficiais.
 import legado from "./legacy.js";
-import { handleAlmoxarifado, integrarTelaAlmoxarifado, injetarLinkAlmoxarifado, injetarGestaoEquipeAlmoxarifado, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife } from "./modules/almoxarifado.js";
+import { handleAlmoxarifado, integrarTelaAlmoxarifado, adaptarMeuEspacoAlmoxarife, injetarLinkAlmoxarifado, injetarGestaoEquipeAlmoxarifado, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife } from "./modules/almoxarifado.js";
 import { obterUsuarioLogado } from "./core/auth.js";
 
 export default {
@@ -54,7 +54,8 @@ export default {
     }
 
     const response = await legado.fetch(request, env, ctx);
-    const comNavegacao = await injetarLinkAlmoxarifado(response, request, env);
+    const espacoColaborador = await adaptarMeuEspacoAlmoxarife(response, request, env);
+    const comNavegacao = await injetarLinkAlmoxarifado(espacoColaborador, request, env);
     return injetarGestaoEquipeAlmoxarifado(comNavegacao, request, env);
   }
 };

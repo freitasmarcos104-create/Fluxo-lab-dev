@@ -966,6 +966,68 @@ export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
   return new Response(updated,{status:200,headers});
 }
 
+
+export function renderEspacoColaboradorAlmoxarife(user) {
+  const nome = String(user?.nome || "Colaborador").trim().split(/\\s+/)[0];
+  const saudacao = (() => {
+    const hora = Number(new Intl.DateTimeFormat("pt-BR", {
+      timeZone:"America/Sao_Paulo",hour:"2-digit",hourCycle:"h23"
+    }).format(new Date()));
+    return hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
+  })();
+  const cards = [
+    ["💬","Chat da equipe","Converse com os demais integrantes do Almoxarifado.","/almoxarifado/chat"],
+    ["✉","Comunicação e solicitações","Acesse os canais de comunicação e os pedidos internos.","/comunicacao"],
+    ["📅","Agenda e tarefas","Consulte seus compromissos e tarefas.","/agenda-tarefas"],
+    ["🔔","Notificações","Acompanhe seus avisos e notificações.","/notificacoes"],
+    ["✎","Minhas anotações","Guarde lembretes e informações particulares.","/minhas-notas"],
+    ["◉","Meu perfil","Atualize seus dados e preferências de conta.","/meu-perfil"],
+    ["🎓","Universidade Fluxo Lab","Acesse os cursos e materiais de aprendizagem.","/universidade"],
+    ["🏆","Minha coleção de emblemas","Consulte suas conquistas e reconhecimentos.","/emblemas"]
+  ];
+  return '<style id="espaco-colaborador-almoxarife">' +
+    '.espaco-almox-hero{padding:22px;border:1px solid var(--borda);border-radius:16px;background:linear-gradient(120deg,rgba(16,139,137,.20),var(--branco));margin-bottom:18px}' +
+    '.espaco-almox-hero h2{margin:5px 0 7px;font-size:clamp(24px,3vw,32px)}.espaco-almox-hero p{margin:0;color:var(--texto-suave)}' +
+    '.espaco-almox-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}' +
+    '.espaco-almox-card{display:flex;gap:12px;align-items:flex-start;padding:16px;border:1px solid var(--borda);border-radius:13px;background:var(--branco);text-decoration:none;color:var(--texto);min-height:100px;box-shadow:var(--sombra)}' +
+    '.espaco-almox-card:hover{border-color:var(--turquesa);transform:translateY(-1px)}.espaco-almox-icone{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:11px;background:var(--superficie-suave);font-size:21px}' +
+    '.espaco-almox-card strong{display:block;margin:0 0 5px}.espaco-almox-card small{color:var(--texto-suave);line-height:1.4}' +
+    '</style>' +
+    '<section class="espaco-almox-hero"><div class="mini">ESPAÇO DO COLABORADOR</div><h2>' +
+    escaparHtmlAlmox(saudacao + ", " + nome + "!") +
+    '</h2><p>Este é seu espaço pessoal no Fluxo Lab, com acesso às ferramentas de colaboração, comunicação e aprendizagem.</p></section>' +
+    '<h3 style="margin:18px 0 10px">Minhas ferramentas</h3><div class="espaco-almox-grid">' +
+    cards.map(([icone,titulo,descricao,href]) =>
+      '<a class="espaco-almox-card" href="' + href + '"><span class="espaco-almox-icone">' + icone +
+      '</span><span><strong>' + escaparHtmlAlmox(titulo) + '</strong><small>' +
+      escaparHtmlAlmox(descricao) + '</small></span></a>'
+    ).join("") + '</div>';
+}
+
+export async function adaptarMeuEspacoAlmoxarife(response,request,env) {
+  const url = new URL(request.url);
+  if (!response || response.status !== 200 || request.method !== "GET" || url.pathname !== "/meu-espaco") return response;
+  const user = await obterUsuarioLogado(request,env);
+  if (!(await ehFuncionarioAlmoxarifado(env,user))) return response;
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("text/html")) return response;
+  const original = await response.text();
+  const mainOpen = original.indexOf('<main class="container">');
+  const mainStart = mainOpen >= 0 ? original.indexOf(">",mainOpen) + 1 : -1;
+  const mainEnd = mainStart > 0 ? original.indexOf("</main>",mainStart) : -1;
+  if (mainOpen < 0 || mainStart <= 0 || mainEnd < 0) {
+    return new Response("Não foi possível abrir o Espaço do Colaborador.", {
+      status:500,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}
+    });
+  }
+  const updated = original.slice(0,mainStart) + renderEspacoColaboradorAlmoxarife(user) + original.slice(mainEnd);
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  headers.set("cache-control","private, no-store");
+  return new Response(updated,{status:response.status,statusText:response.statusText,headers});
+}
+
 export async function injetarLinkAlmoxarifado(response, request, env) {
   if (!response || response.status !== 200 || request.method === "HEAD") return response;
   const url = new URL(request.url);
