@@ -8,6 +8,7 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "worker" / "migrations" / "0002_v5100_almoxarifado.sql"
 CHAT_MIGRATION = ROOT / "worker" / "migrations" / "0003_v5120_almoxarifado_chat.sql"
+REMOVE_CHAT_MIGRATION = ROOT / "worker" / "migrations" / "0004_v5130_remove_almoxarifado_chat.sql"
 
 
 class AlmoxarifadoMigrationTests(unittest.TestCase):
@@ -16,8 +17,14 @@ class AlmoxarifadoMigrationTests(unittest.TestCase):
         self.db.execute("PRAGMA foreign_keys = ON")
         self.db.execute("CREATE TABLE usuarios (id INTEGER PRIMARY KEY, nome TEXT NOT NULL)")
         self.db.execute("INSERT INTO usuarios (id,nome) VALUES (1,'Usuário de teste')")
+        self.db.execute("""CREATE TABLE chat_equipe_digital (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, autor_id INTEGER NOT NULL,
+            mensagem TEXT NOT NULL, criado_em TEXT NOT NULL, expira_em TEXT NOT NULL,
+            favorita INTEGER NOT NULL DEFAULT 0
+        )""")
         self.db.executescript(MIGRATION.read_text(encoding="utf-8"))
         self.db.executescript(CHAT_MIGRATION.read_text(encoding="utf-8"))
+        self.db.executescript(REMOVE_CHAT_MIGRATION.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.db.close()
@@ -65,8 +72,20 @@ class AlmoxarifadoMigrationTests(unittest.TestCase):
             "almoxarifado_equipe", "almoxarifado_itens", "almoxarifado_lotes", "almoxarifado_movimentos",
             "almoxarifado_requisicoes", "almoxarifado_requisicao_itens",
             "almoxarifado_saldos_lotes", "almoxarifado_saldos_itens",
-            "almoxarifado_status_requisicoes", "almoxarifado_chat_mensagens",
+            "almoxarifado_status_requisicoes",
         }.issubset(names))
+
+
+    def test_general_chat_table_is_preserved_and_the_unused_almox_chat_is_removed(self):
+        names = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+        self.assertIn("chat_equipe_digital", names)
+        self.assertNotIn("almoxarifado_chat_mensagens", names)
+        indexes = {row[0] for row in self.db.execute(
+            "SELECT name FROM sqlite_master WHERE type='index'"
+        )}
+        self.assertNotIn("idx_almox_chat_data", indexes)
 
     def test_almoxarifado_team_is_separate_from_production_areas(self):
         columns = {row[1] for row in self.db.execute("PRAGMA table_info(almoxarifado_equipe)")}
@@ -89,24 +108,6 @@ class AlmoxarifadoMigrationTests(unittest.TestCase):
                 self.item(tipo, tipo, tipo=tipo, controla_lote=0)
             self.item(tipo + "-OK", tipo, tipo=tipo, controla_lote=1)
 
-
-    def test_team_chat_is_scoped_and_messages_have_length_constraints(self):
-        self.db.execute(
-            "INSERT INTO almoxarifado_chat_mensagens (usuario_id,mensagem) VALUES (1,'Olá, equipe')"
-        )
-        row = self.db.execute(
-            "SELECT usuario_id,mensagem FROM almoxarifado_chat_mensagens"
-        ).fetchone()
-        self.assertEqual(row, (1, "Olá, equipe"))
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.db.execute(
-                "INSERT INTO almoxarifado_chat_mensagens (usuario_id,mensagem) VALUES (1,'   ')"
-            )
-        with self.assertRaises(sqlite3.IntegrityError):
-            self.db.execute(
-                "INSERT INTO almoxarifado_chat_mensagens (usuario_id,mensagem) VALUES (1,?)",
-                ("x" * 1501,),
-            )
 
     def test_balance_is_derived_and_never_goes_negative(self):
         item_id = self.item("PON-01", "Ponteira")
