@@ -20272,8 +20272,8 @@ function paginaMinhasNotasV310(usuario, notas, mensagem = "", tipo = "sucesso") 
         var LIMITE=4000;
         function tamanho(editor){
           var texto=typeof editor.innerText==="string"?editor.innerText:editor.textContent||"";
-          texto=texto.replace(/\u00a0/g," ").replace(/\r\n?/g,"\n");
-          if(texto.endsWith("\n")) texto=texto.slice(0,-1);
+          texto=texto.split(String.fromCharCode(160)).join(" ").split(String.fromCharCode(13)).join("");
+          if(texto.charCodeAt(texto.length-1)===10) texto=texto.slice(0,-1);
           return texto.length;
         }
         function faixaAtual(editor,ultima){
