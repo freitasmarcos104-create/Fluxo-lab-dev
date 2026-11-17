@@ -180,7 +180,7 @@ test("topo exclusivo do Almoxarifado não oferece retorno às funções gerais e
   const layout = source.slice(inicio, fim);
   assert.match(layout, /Área exclusiva · Almoxarifado/);
   assert.match(layout, /action="\/logout"/);
-  assert.match(layout, /almoxarifeExclusivo \?/);
+  assert.match(layout, /almoxarifeExclusivo\s*\?/);
 });
 
 test("o vínculo ativo de funcionário do Almoxarifado é identificado separadamente", async () => {
