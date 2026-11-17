@@ -11,10 +11,10 @@ CREATE TABLE almoxarifado_itens (
   local_padrao TEXT NOT NULL,
   quantidade_minima REAL NOT NULL DEFAULT 0 CHECK (quantidade_minima >= 0),
   controla_lote INTEGER NOT NULL DEFAULT 0 CHECK (controla_lote IN (0,1)),
-  CHECK (tipo NOT IN ('REAGENTE','PADRAO','KIT') OR controla_lote=1),
   ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0,1)),
   criado_por INTEGER NOT NULL,
   criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CHECK (tipo NOT IN ('REAGENTE','PADRAO','KIT') OR controla_lote=1),
   FOREIGN KEY (criado_por) REFERENCES usuarios(id) ON DELETE RESTRICT
 );
 
