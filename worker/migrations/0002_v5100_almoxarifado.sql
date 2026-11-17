@@ -11,6 +11,7 @@ CREATE TABLE almoxarifado_itens (
   local_padrao TEXT NOT NULL,
   quantidade_minima REAL NOT NULL DEFAULT 0 CHECK (quantidade_minima >= 0),
   controla_lote INTEGER NOT NULL DEFAULT 0 CHECK (controla_lote IN (0,1)),
+  CHECK (tipo NOT IN ('REAGENTE','PADRAO','KIT') OR controla_lote=1),
   ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0,1)),
   criado_por INTEGER NOT NULL,
   criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -112,7 +113,7 @@ BEGIN
       SELECT 1 FROM almoxarifado_lotes
       WHERE id=NEW.lote_id AND (status='VENCIDO' OR (validade IS NOT NULL AND validade < date('now')))
     ) THEN RAISE(ABORT, 'Baixa por vencimento exige lote vencido.')
-    WHEN NEW.tipo IN ('SAIDA','PERDA') AND NOT EXISTS (
+    WHEN NEW.tipo='SAIDA' AND NOT EXISTS (
       SELECT 1 FROM almoxarifado_lotes
       WHERE id=NEW.lote_id AND status='DISPONIVEL' AND (validade IS NULL OR validade >= date('now'))
     ) THEN RAISE(ABORT, 'Lote vencido, em quarentena ou bloqueado não pode sair.')
@@ -195,7 +196,10 @@ GROUP BY l.id;
 
 CREATE VIEW almoxarifado_saldos_itens AS
 SELECT i.id AS item_id,i.codigo,i.nome,i.tipo,i.unidade,i.quantidade_minima,
-  COALESCE(SUM(s.saldo),0) AS saldo_total
+  COALESCE(SUM(s.saldo),0) AS saldo_total,
+  COALESCE(SUM(CASE
+    WHEN s.status_lote='DISPONIVEL' AND (s.validade IS NULL OR s.validade >= date('now'))
+    THEN s.saldo ELSE 0 END),0) AS saldo_disponivel
 FROM almoxarifado_itens i
 LEFT JOIN almoxarifado_saldos_lotes s ON s.item_id=i.id
 WHERE i.ativo=1
