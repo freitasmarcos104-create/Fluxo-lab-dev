@@ -968,7 +968,7 @@ export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
 
 
 export function renderEspacoColaboradorAlmoxarife(user) {
-  const nome = String(user?.nome || "Colaborador").trim().split(/\\s+/)[0];
+  const nome = String(user?.nome || "Colaborador").trim().split(/\s+/)[0];
   const saudacao = (() => {
     const hora = Number(new Intl.DateTimeFormat("pt-BR", {
       timeZone:"America/Sao_Paulo",hour:"2-digit",hourCycle:"h23"
