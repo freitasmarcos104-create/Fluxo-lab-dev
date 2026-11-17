@@ -182,6 +182,12 @@ async function registrarMovimentoEspecial(env, user, body) {
   const lote = await primeiro(env.db, "SELECT s.*,l.localizacao AS local_atual FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=?", loteId);
   if (!lote) throw new Error("Lote não encontrado.");
   if (tipo === "TRANSFERENCIA") {
+    if (lote.status_lote !== "DISPONIVEL" || (lote.validade && lote.validade < new Date().toISOString().slice(0, 10))) {
+      throw new Error("Somente lote disponível e dentro da validade pode ser transferido.");
+    }
+    if (Math.abs(quantidade - Number(lote.saldo)) > 0.000001) {
+      throw new Error("A transferência desta versão move o lote inteiro, pois cada lote possui uma única localização.");
+    }
     const destino = String(body.local_destino || "").trim().slice(0, 100);
     if (!destino || destino === lote.local_atual) throw new Error("Informe um local de destino diferente do atual.");
     await env.db.batch([
@@ -207,16 +213,18 @@ async function alterarStatusLote(env, body) {
   await executar(env.db, "UPDATE almoxarifado_lotes SET status=? WHERE id=?", status, loteId);
 }
 
-async function dadosItens(env) {
+async function dadosItens(env, busca = "") {
+  const termo = String(busca || "").trim().toLowerCase();
   return todos(env.db,
-    "SELECT i.*,COALESCE(SUM(s.saldo),0) AS saldo_total FROM almoxarifado_itens i LEFT JOIN almoxarifado_saldos_lotes s ON s.item_id=i.id WHERE i.ativo=1 GROUP BY i.id ORDER BY i.nome COLLATE NOCASE");
+    "SELECT i.*,COALESCE(SUM(s.saldo),0) AS saldo_total FROM almoxarifado_itens i LEFT JOIN almoxarifado_saldos_lotes s ON s.item_id=i.id WHERE i.ativo=1 AND (?='' OR lower(i.codigo) LIKE ? OR lower(i.nome) LIKE ?) GROUP BY i.id ORDER BY i.nome COLLATE NOCASE",
+    termo, "%" + termo + "%", "%" + termo + "%");
 }
 
 async function dadosLotes(env, itemId = 0) {
   const filtro = Number(itemId) > 0 ? " AND s.item_id=?" : "";
   const params = Number(itemId) > 0 ? [Number(itemId)] : [];
   return todos(env.db,
-    "SELECT s.*,i.codigo,i.nome,i.unidade,i.controla_lote,CASE WHEN s.status_lote='BLOQUEADO' THEN 'BLOQUEADO' WHEN s.status_lote='QUARENTENA' THEN 'QUARENTENA' WHEN s.validade IS NOT NULL AND s.validade<date('now') THEN 'VENCIDO' ELSE 'DISPONIVEL' END AS status_exibicao FROM almoxarifado_saldos_lotes s JOIN almoxarifado_itens i ON i.id=s.item_id WHERE 1=1" + filtro + " ORDER BY CASE WHEN s.validade IS NULL THEN 1 ELSE 0 END,s.validade ASC,s.recebido_em ASC,s.lote_id ASC",
+    "SELECT s.*,i.codigo,i.nome,i.unidade,i.controla_lote,CASE WHEN s.status_lote='BLOQUEADO' THEN 'BLOQUEADO' WHEN s.status_lote='QUARENTENA' THEN 'QUARENTENA' WHEN s.status_lote='VENCIDO' THEN 'VENCIDO' WHEN s.validade IS NOT NULL AND s.validade<date('now') THEN 'VENCIDO' ELSE 'DISPONIVEL' END AS status_exibicao FROM almoxarifado_saldos_lotes s JOIN almoxarifado_itens i ON i.id=s.item_id WHERE 1=1" + filtro + " ORDER BY CASE WHEN s.validade IS NULL THEN 1 ELSE 0 END,s.validade ASC,s.recebido_em ASC,s.lote_id ASC",
     ...params);
 }
 
@@ -410,7 +418,7 @@ function layoutAlmox(user, view, content, gerente, notice = "") {
 async function renderView(env, user, url) {
   const view = String(url.searchParams.get("view") || "dashboard");
   const gerente = gerenteAlmox(user);
-  const itens = await dadosItens(env);
+  const itens = await dadosItens(env,url.searchParams.get("q"));
   const lotes = await dadosLotes(env);
   let content = "";
   let requisicoes = [];
@@ -431,8 +439,11 @@ async function renderView(env, user, url) {
     requisicoes = (await dadosRequisicoes(env)).filter((r) => ["ABERTA","PARCIAL"].includes(r.status)).slice(0,8);
     content += '<section class="panel"><h2>Requisições pendentes</h2>' + renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
   } else if (view === "itens") {
+    const busca = String(url.searchParams.get("q") || "");
     content = (gerente ? '<section class="panel"><h2>Novo item</h2>' + formularioItem() + '</section>' : "") +
-      '<section class="panel"><h2>Catálogo de materiais</h2>' + renderTabelaItens(itens) + '</section>';
+      '<section class="panel"><h2>Catálogo de materiais</h2><form class="linha-form" method="GET" action="/almoxarifado">' +
+      '<input type="hidden" name="view" value="itens"><input name="q" value="' + escaparHtmlAlmox(busca) +
+      '" placeholder="Buscar por código ou nome"><button>Buscar</button></form><br>' + renderTabelaItens(itens) + '</section>';
   } else if (view === "entrada") {
     content = gerente ? '<section class="panel"><h2>Registrar recebimento</h2><p class="muted">O material conferido entra como disponível. Material pendente de checagem entra em quarentena.</p>' +
       formularioEntrada(itens) + '</section>' : '<section class="panel"><p>Entrada de materiais restrita à administração e coordenação.</p></section>';
@@ -509,7 +520,7 @@ async function processarFormulario(request, env, user) {
 async function handleApi(request, env, url, user) {
   const path = url.pathname;
   if (request.method === "GET" && path === "/almoxarifado/api/painel") return respostaJson(await dadosPainel(env));
-  if (request.method === "GET" && path === "/almoxarifado/api/itens") return respostaJson(await dadosItens(env));
+  if (request.method === "GET" && path === "/almoxarifado/api/itens") return respostaJson(await dadosItens(env,url.searchParams.get("q")));
   if (request.method === "GET" && path === "/almoxarifado/api/lotes") return respostaJson(await dadosLotes(env,url.searchParams.get("item_id")));
   if (request.method === "GET" && path === "/almoxarifado/api/requisicoes") return respostaJson(await dadosRequisicoes(env));
   if (request.method === "GET" && path === "/almoxarifado/api/movimentos") return respostaJson(await dadosMovimentos(env));
@@ -544,6 +555,14 @@ export async function handleAlmoxarifado(request, env, url) {
   const isApi = url.pathname.startsWith("/almoxarifado/api/");
   if (!user) return isApi ? respostaJson({erro:"Sessão expirada."},401) : new Response(null,{status:302,headers:{Location:"/"}});
   try {
+    if (request.method === "POST") {
+      const origin = request.headers.get("origin");
+      const crossSite = request.headers.get("sec-fetch-site") === "cross-site";
+      if ((origin && origin !== new URL(request.url).origin) || crossSite) {
+        return isApi ? respostaJson({erro:"Origem da solicitação não autorizada."},403) :
+          redirecionar("/almoxarifado?erro=" + encodeURIComponent("Origem da solicitação não autorizada."));
+      }
+    }
     if (isApi) {
       if (request.method !== "GET" && request.method !== "POST") return respostaJson({erro:"Método não permitido."},405);
       return await handleApi(request,env,url,user);
