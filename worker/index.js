@@ -2,7 +2,7 @@
 // O Worker legado continua responsável por toda a aplicação existente.
 // O Almoxarifado é interceptado aqui e compartilha autenticação, D1 e deploy oficiais.
 import legado from "./legacy.js";
-import { handleAlmoxarifado, injetarLinkAlmoxarifado } from "./modules/almoxarifado.js";
+import { handleAlmoxarifado, injetarLinkAlmoxarifado, injetarGestaoEquipeAlmoxarifado } from "./modules/almoxarifado.js";
 
 export default {
   ...legado,
@@ -12,6 +12,7 @@ export default {
       return handleAlmoxarifado(request, env, url);
     }
     const response = await legado.fetch(request, env, ctx);
-    return injetarLinkAlmoxarifado(response, request);
+    const comNavegacao = await injetarLinkAlmoxarifado(response, request);
+    return injetarGestaoEquipeAlmoxarifado(comNavegacao, request, env);
   }
 };
