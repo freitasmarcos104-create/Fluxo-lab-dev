@@ -167,9 +167,17 @@ async function listarChatEquipeDigitalV3420ServiceV54(env) {
         SELECT GROUP_CONCAT(us.setor, '|')
         FROM usuario_setores us
         WHERE us.usuario_id = u.id
-          AND us.area = 'DIGITAL'
           AND us.ativo = 1
-      ), '') AS setores_digitais
+      ), CASE
+        WHEN UPPER(COALESCE(u.area_producao,'')) = 'ALMOXARIFADO' THEN 'ALMOXARIFADO'
+        WHEN UPPER(COALESCE(u.area_producao,'')) = 'CONVENCIONAL' THEN 'CONVENCIONAL'
+        WHEN UPPER(COALESCE(u.area_producao,'')) = 'DIGITAL' THEN 'DIGITAL'
+        ELSE ''
+      END) AS setores_digitais,
+      EXISTS (
+        SELECT 1 FROM almoxarifado_equipe ae
+        WHERE ae.usuario_id = u.id AND ae.ativo = 1
+      ) AS eh_almoxarife
     FROM chat_equipe_digital c
     INNER JOIN usuarios u ON u.id = c.autor_id
     WHERE c.expira_em > ? OR COALESCE(c.favorita, 0) = 1
@@ -5501,12 +5509,8 @@ function podeUsarMensagensPrivadasV3420(usuario) {
   ].includes(usuario.perfil);
 }
 function podeAcessarChatEquipeDigitalV3420(usuario) {
-  if (!usuario || isCadastro(usuario)) return false;
-  if (isCoord(usuario)) return true;
-  if (isGerencia(usuario)) return areasUsuarioV31(usuario).includes("DIGITAL");
-  if (usuario.perfil !== "FUNCIONARIO") return false;
-  if (!areasUsuarioV31(usuario).includes("DIGITAL")) return false;
-  return setoresUsuarioV31(usuario, "DIGITAL").some((setor) => SETORES.includes(setor));
+  // Canal geral: funcionários e perfis de gestão participam sem filtro de área.
+  return podeUsarMensagensPrivadasV3420(usuario);
 }
 function podeCadastrarDigitalV3418(usuario) {
   return isCadastro(usuario) || podeGerenciarAreaV31(usuario, "DIGITAL");
@@ -5786,7 +5790,7 @@ function layout(conteudo, titulo = "Fluxo Lab", usuario = null) {
     const chatEquipeDigital = podeAcessarChatEquipeDigitalV3420(usuario) ? `
         <a href="/digital/chat-equipe">
           <span class="nav-icone">💬</span>
-          <span>Chat equipe Digital</span>
+          <span>Chat Geral</span>
         </a>
         ` : "";
     const cadastro = isCadastro(usuario) ? `
@@ -14252,18 +14256,19 @@ ${linhas || `
 }
 function siglaSetorChatDigitalV3420(setor) {
   const mapa = {
-    "CAD/CAM": "CAD",
-    FATIAMENTO: "FAT",
-    IMPRESSAO: "IMP",
-    ACABAMENTO: "ACB"
+    "CAD/CAM": "CAD", FATIAMENTO: "FAT", IMPRESSAO: "IMP", ACABAMENTO: "ACB",
+    ARTICULACAO: "ART", MONTAGEM: "MONT", ENCERRAMENTO: "ENCR", ESCULTURA: "ESCU",
+    INCLUSAO: "INCL", ACRILIZACAO: "ACRI", DESINCLUSAO: "DES", QUALIDADE: "QUAL",
+    CONVENCIONAL: "CONV", ALMOXARIFADO: "ALMOX", DIGITAL: "DIG"
   };
   return mapa[String(setor || "").toUpperCase()] || String(setor || "").slice(0, 5);
 }
 function seloAutorChatDigitalV3420(item) {
   if (item.perfil === "ADMINISTRADOR") return "👑 ADM";
   if (item.perfil === "COORDENADOR") return "◆ COORDENADOR";
-  if (item.perfil === "GERENCIA") return "★ GERENTE DIGITAL";
-  const setores = listaPipeV31(item.setores_digitais).filter((setor) => SETORES.includes(setor)).map(siglaSetorChatDigitalV3420);
+  if (item.perfil === "GERENCIA") return "★ GERENTE";
+  if (Number(item.eh_almoxarife || 0) === 1) return "📦 ALMOXARIFADO";
+  const setores = listaPipeV31(item.setores_digitais).map(siglaSetorChatDigitalV3420).filter(Boolean);
   return setores.length ? `● ${setores.join(" + ")}` : "● FUNCIONÁRIO";
 }
 function corAutorChatDigitalV3420(id, nome = "") {
@@ -14355,21 +14360,28 @@ function renderChatEquipeDigitalV3420(mensagens, usuario) {
   return html;
 }
 function paginaChatEquipeDigitalV3420(usuario, mensagens, mensagem = "", tipo = "sucesso") {
-  const setores = usuario.perfil === "FUNCIONARIO" ? setoresUsuarioV31(usuario, "DIGITAL").filter((s) => SETORES.includes(s)).map(siglaSetorChatDigitalV3420).join(" + ") : "Gestão Digital";
+  const setoresUsuario = [
+    ...setoresUsuarioV31(usuario, "DIGITAL").map(siglaSetorChatDigitalV3420),
+    ...setoresUsuarioV31(usuario, "CONVENCIONAL").map(siglaSetorChatDigitalV3420),
+    ...(Number(usuario?.eh_almoxarife || 0) === 1 || String(usuario?.area_producao || "").toUpperCase() === "ALMOXARIFADO" ? ["ALMOX"] : [])
+  ];
+  const setores = usuario.perfil === "FUNCIONARIO"
+    ? [...new Set(setoresUsuario)].join(" + ") || "Colaborador do Fluxo Lab"
+    : "Gestão Geral";
   return layout(`
     <div class="cabecalho-pagina">
       <div>
-        <h2>💬 Chat da equipe Digital</h2>
-        <p class="nota">CAD/CAM, Fatiamento, Impressão, Acabamento e gestão no mesmo canal. As mensagens somem sozinhas ao completar 48 horas. A ⭐ marca o que fica guardado, e só sai quando alguém desfavoritar.</p>
+        <h2>💬 Chat Geral do Fluxo Lab</h2>
+        <p class="nota">Canal compartilhado por Digital, Convencional, Almoxarifado e gestão. As mensagens somem sozinhas ao completar 48 horas. A ⭐ mantém uma mensagem guardada.</p>
       </div>
-      <a class="botao botao-sec" href="/digital">← Área Digital</a>
+      <a class="botao botao-sec" href="/">← Início do Fluxo Lab</a>
     </div>
     ${mensagem ? `<div class="${tipo}">${escapeHtml(mensagem)}</div>` : ""}
     <div class="chat-equipe-wrap">
       <section class="card chat-equipe-info">
-        <div><strong>Equipe Digital</strong><div class="mini">Você está identificado como ${escapeHtml(setores || perfilNome(usuario.perfil))}.</div></div>
+        <div><strong>Todos os setores</strong><div class="mini">Você está identificado como ${escapeHtml(setores || perfilNome(usuario.perfil))}.</div></div>
         <div class="chat-equipe-legenda">
-          <span class="chat-equipe-selo">👑 ADM</span><span class="chat-equipe-selo">◆ Coordenador</span><span class="chat-equipe-selo">★ Gerente</span><span class="chat-equipe-selo">● CAD / FAT / IMP / ACB</span>
+          <span class="chat-equipe-selo">👑 ADM</span><span class="chat-equipe-selo">◆ Coordenador</span><span class="chat-equipe-selo">★ Gerência</span><span class="chat-equipe-selo">● Digital</span><span class="chat-equipe-selo">◫ Convencional</span><span class="chat-equipe-selo">📦 Almoxarifado</span>
           <div class="chat-notificacao-controles">
             <button type="button" class="botao botao-sec" id="chat-equipe-som-v35" style="padding:6px 10px">🔊 Ativar som</button>
             <button type="button" class="botao botao-sec" id="chat-equipe-testar-som-v35" style="padding:6px 10px">🎵 Testar som</button>
@@ -14393,7 +14405,7 @@ function paginaChatEquipeDigitalV3420(usuario, mensagens, mensagem = "", tipo = 
       const statusAviso=document.getElementById('chat-equipe-status-v35');
       if(!caixa)return;
       const meuId=${Number(usuario?.id || 0)};
-      const chaveSom='fluxolab-chat-digital-som-v35';
+      const chaveSom='fluxolab-chat-geral-som-v35';
       let somAtivo=localStorage.getItem(chaveSom)==='1';
       let audioCtx=null;
       let audioLiberado=false;
@@ -14511,9 +14523,9 @@ function paginaChatEquipeDigitalV3420(usuario, mensagens, mensagem = "", tipo = 
         if(!novas.length||!('Notification' in window)||Notification.permission!=='granted')return;
         const dados=dadosMensagem(novas[novas.length-1]);
         const titulo=novas.length>1?'Fluxo Lab · '+novas.length+' novas mensagens':'Fluxo Lab · '+dados.nome;
-        const corpo=(novas.length>1?'Última: ':'')+(dados.texto||'Nova mensagem no Chat Digital').slice(0,220);
+        const corpo=(novas.length>1?'Última: ':'')+(dados.texto||'Nova mensagem no Chat Geral').slice(0,220);
         try{
-          const n=new Notification(titulo,{body:corpo,tag:'fluxolab-chat-digital-'+dados.id});
+          const n=new Notification(titulo,{body:corpo,tag:'fluxolab-chat-geral-'+dados.id});
           n.onclick=()=>{try{window.focus();location.href='/digital/chat-equipe';n.close();}catch(_){ }};
           setTimeout(()=>{try{n.close();}catch(_){ }},12000);
         }catch(_){ }
@@ -14545,7 +14557,7 @@ function paginaChatEquipeDigitalV3420(usuario, mensagens, mensagem = "", tipo = 
       },12000);
     })();
     <\/script>
-  `, "Chat equipe Digital", usuario);
+  `, "Chat Geral do Fluxo Lab", usuario);
 }
 function erroMigracaoChatDigitalV3420(erro) {
   return /no such table:\s*chat_equipe_digital/i.test(String(erro?.message || erro));
@@ -25113,8 +25125,10 @@ async function rotearV31Base(request, env, url, caminho) {
   if (caminho === "/digital/chat-equipe" && metodo === "GET") {
     const usuario = await obterUsuarioLogado(request, env);
     if (!usuario) return redirect("/");
-    if (!podeAcessarChatEquipeDigitalV3420(usuario)) return textResponse("Acesso restrito à equipe Digital.", 403);
+    if (!podeAcessarChatEquipeDigitalV3420(usuario)) return textResponse("Acesso restrito ao Chat Geral.", 403);
     try {
+      const vinculoAlmox = await env.db.prepare("SELECT 1 FROM almoxarifado_equipe WHERE usuario_id = ? AND ativo = 1 LIMIT 1").bind(usuario.id).first();
+      if (vinculoAlmox) usuario.eh_almoxarife = 1;
       await limparChatEquipeDigitalV3420(env);
       const mensagens = await listarChatEquipeDigitalV3420(env);
       const resposta = htmlResponse(paginaChatEquipeDigitalV3420(
@@ -25127,7 +25141,7 @@ async function rotearV31Base(request, env, url, caminho) {
       return resposta;
     } catch (erro) {
       if (erroMigracaoChatDigitalV3420(erro)) {
-        return htmlResponse(layout(`<div class="erro"><strong>Migração do Chat Digital pendente.</strong><br>Aplique o arquivo MIGRACAO_V3.4.20_CHAT_EQUIPE_DIGITAL.sql no D1 e abra esta página novamente.</div>`, "Chat equipe Digital", usuario), 503);
+        return htmlResponse(layout(`<div class="erro"><strong>Migração do Chat Geral pendente.</strong><br>Aplique o arquivo MIGRACAO_V3.4.20_CHAT_EQUIPE_DIGITAL.sql no D1 e abra esta página novamente.</div>`, "Chat Geral do Fluxo Lab", usuario), 503);
       }
       throw erro;
     }
@@ -25135,7 +25149,7 @@ async function rotearV31Base(request, env, url, caminho) {
   if (caminho === "/digital/chat-equipe/favoritar" && metodo === "POST") {
     const usuario = await obterUsuarioLogado(request, env);
     if (!usuario) return redirect("/");
-    if (!podeAcessarChatEquipeDigitalV3420(usuario)) return textResponse("Acesso restrito à equipe Digital.", 403);
+    if (!podeAcessarChatEquipeDigitalV3420(usuario)) return textResponse("Acesso restrito ao Chat Geral.", 403);
     const dados = await request.formData();
     const id = Number(dados.get("id"));
     const favorita = String(dados.get("favorita")) === "1" ? 1 : 0;
@@ -25157,7 +25171,7 @@ async function rotearV31Base(request, env, url, caminho) {
   if (caminho === "/digital/chat-equipe" && metodo === "POST") {
     const usuario = await obterUsuarioLogado(request, env);
     if (!usuario) return redirect("/");
-    if (!podeAcessarChatEquipeDigitalV3420(usuario)) return textResponse("Acesso restrito à equipe Digital.", 403);
+    if (!podeAcessarChatEquipeDigitalV3420(usuario)) return textResponse("Acesso restrito ao Chat Geral.", 403);
     const dados = await request.formData();
     const mensagem = String(dados.get("mensagem") || "").trim();
     if (!mensagem || mensagem.length > 1500) return redirect(`/digital/chat-equipe?erro=${encodeURIComponent("Mensagem inválida. Use até 1500 caracteres.")}`);
@@ -25171,7 +25185,7 @@ async function rotearV31Base(request, env, url, caminho) {
       `).bind(usuario.id, mensagem, criadoEm.toISOString(), expiraEm.toISOString()).run();
       return redirect("/digital/chat-equipe");
     } catch (erro) {
-      if (erroMigracaoChatDigitalV3420(erro)) return textResponse("Migração V3.4.20 do Chat Digital ainda não foi aplicada.", 503);
+      if (erroMigracaoChatDigitalV3420(erro)) return textResponse("Migração do Chat Geral ainda não foi aplicada.", 503);
       throw erro;
     }
   }

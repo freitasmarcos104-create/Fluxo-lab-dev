@@ -46,12 +46,13 @@ export function deveBloquearRotaAlmoxarife(isAlmoxarife, pathname, method) {
   // mas não recebe rotas de produção, relatórios ou gestão operacional.
   const rotasColaborador = [
     "/meu-espaco", "/comunicacao", "/agenda-tarefas", "/notificacoes",
-    "/emblemas", "/universidade", "/meu-perfil", "/minhas-notas", "/mensagens"
+    "/emblemas", "/universidade", "/meu-perfil", "/minhas-notas", "/mensagens",
+    "/digital/chat-equipe", "/api/digital/chat-equipe"
   ];
   if (rotasColaborador.includes(path)) return false;
   if (["/comunicacao/", "/agenda-tarefas/", "/notificacoes/", "/emblemas/",
        "/universidade/", "/meu-perfil/", "/minhas-notas/", "/mensagens/",
-       "/foto-usuario/", "/avatar-usuario/"].some(prefix => path.startsWith(prefix))) return false;
+       "/digital/chat-equipe/", "/foto-usuario/", "/avatar-usuario/"].some(prefix => path.startsWith(prefix))) return false;
   if (path.startsWith("/uploads/avatar/") || path.startsWith("/uploads/fotos/")) return false;
   return true;
 }
@@ -666,56 +667,6 @@ async function handleApi(request, env, url, user) {
 }
 
 
-async function podeAcessarChatAlmoxarifado(env,user) {
-  return gerenteAlmox(user) || ehFuncionarioAlmoxarifado(env,user);
-}
-
-async function dadosChatAlmoxarifado(env) {
-  const mensagens = await todos(env.db, `
-    SELECT c.id,c.usuario_id,c.mensagem,c.criado_em,u.nome
-    FROM almoxarifado_chat_mensagens c
-    INNER JOIN usuarios u ON u.id=c.usuario_id
-    ORDER BY c.id DESC LIMIT 100
-  `);
-  return mensagens.reverse();
-}
-
-function renderChatAlmoxarifado(mensagens,user,notice="") {
-  const linhas = mensagens.map((m) => {
-    const propria = Number(m.usuario_id) === Number(user.id);
-    return '<article class="almox-chat-msg ' + (propria ? 'almox-chat-propria' : '') + '">' +
-      '<div class="almox-chat-meta"><strong>' + escaparHtmlAlmox(m.nome || "Usuário") + '</strong><span>' +
-      escaparHtmlAlmox(m.criado_em) + '</span></div><p>' + escaparHtmlAlmox(m.mensagem) + '</p></article>';
-  }).join("");
-  const corpo = linhas || '<p class="vazio">Ainda não há mensagens. Comece a conversa com a equipe.</p>';
-  return respostaHtml(layoutAlmox(user,"chat",
-    '<section class="panel"><div class="cabecalho-pagina"><div><h2>Chat da equipe</h2><p class="muted">Canal reservado ao Almoxarifado e à administração.</p></div></div>' +
-    '<div class="almox-chat-lista">' + corpo + '</div>' +
-    '<form method="POST" action="/almoxarifado/chat" class="almox-chat-form">' +
-    '<label for="almox-chat-mensagem">Mensagem</label><textarea id="almox-chat-mensagem" name="mensagem" rows="2" minlength="1" maxlength="1500" required placeholder="Escreva para a equipe..."></textarea>' +
-    '<div class="acoes"><button type="submit">Enviar mensagem</button></div></form></section>',true,notice,true));
-}
-
-async function processarChatAlmoxarifado(request,env,user) {
-  if (!(await podeAcessarChatAlmoxarifado(env,user))) {
-    return respostaJson({erro:"Acesso restrito à equipe do Almoxarifado."},403);
-  }
-  if (request.method === "GET") {
-    const notice=String(new URL(request.url).searchParams.get("ok") || new URL(request.url).searchParams.get("erro") || "");
-    return renderChatAlmoxarifado(await dadosChatAlmoxarifado(env),user,notice);
-  }
-  if (request.method !== "POST") return respostaJson({erro:"Método não permitido."},405);
-  const form=await request.formData();
-  const mensagem=String(form.get("mensagem") || "").trim();
-  if (!mensagem || mensagem.length>1500) {
-    return redirecionar("/almoxarifado/chat?erro="+encodeURIComponent("A mensagem deve ter entre 1 e 1.500 caracteres."));
-  }
-  await executar(env.db,
-    "INSERT INTO almoxarifado_chat_mensagens (usuario_id,mensagem) VALUES (?,?)",
-    Number(user.id),mensagem);
-  return redirecionar("/almoxarifado/chat?ok="+encodeURIComponent("Mensagem enviada."));
-}
-
 async function listarEquipeAlmoxarifado(env) {
   return todos(env.db, `
     SELECT u.id,u.nome,u.usuario,u.ativo,u.excluido,
@@ -857,9 +808,6 @@ export async function handleAlmoxarifado(request, env, url) {
     if (url.pathname.startsWith("/almoxarifado/equipe/")) {
       return redirecionar(await processarEquipeAlmoxarifado(request,env,user,url.pathname));
     }
-    if (url.pathname === "/almoxarifado/chat") {
-      return await processarChatAlmoxarifado(request,env,user);
-    }
     if (isApi) {
       if (request.method !== "GET" && request.method !== "POST") return respostaJson({erro:"Método não permitido."},405);
       return await handleApi(request,env,url,user);
@@ -881,14 +829,16 @@ export function atualizarIdentificacaoVersaoAlmoxarifado(conteudo, pathname) {
   const texto = String(conteudo ?? "");
   if (pathname === "/service-worker.js") {
     return texto
-      .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.12.0")
-      .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.12.0")
-      .replaceAll("fluxo-lab-v5.11.0", "fluxo-lab-v5.12.0");
+      .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.13.0")
+      .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.13.0")
+      .replaceAll("fluxo-lab-v5.11.0", "fluxo-lab-v5.13.0")
+      .replaceAll("fluxo-lab-v5.12.0", "fluxo-lab-v5.13.0");
   }
   return texto
-    .replaceAll("V5.9.0", "V5.12.0")
-    .replaceAll("V5.10.0", "V5.12.0")
-    .replaceAll("V5.11.0", "V5.12.0");
+    .replaceAll("V5.9.0", "V5.13.0")
+    .replaceAll("V5.10.0", "V5.13.0")
+    .replaceAll("V5.11.0", "V5.13.0")
+    .replaceAll("V5.12.0", "V5.13.0");
 }
 
 
@@ -976,7 +926,7 @@ export function renderEspacoColaboradorAlmoxarife(user) {
     return hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
   })();
   const cards = [
-    ["💬","Chat da equipe","Converse com os demais integrantes do Almoxarifado.","/almoxarifado/chat"],
+    ["💬","Chat Geral do Fluxo Lab","Converse com todos os setores do laboratório.","/digital/chat-equipe"],
     ["✉","Comunicação e solicitações","Acesse os canais de comunicação e os pedidos internos.","/comunicacao"],
     ["📅","Agenda e tarefas","Consulte seus compromissos e tarefas.","/agenda-tarefas"],
     ["🔔","Notificações","Acompanhe seus avisos e notificações.","/notificacoes"],
@@ -1041,10 +991,9 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
   if (ehHtml && updated.includes('class="sidebar-nav"')) {
     const user = env?.db ? await obterUsuarioLogado(request,env) : null;
     const almoxarife = await ehFuncionarioAlmoxarifado(env,user);
-    const gestor = gerenteAlmox(user);
     const podeVerLink = !user || String(user.perfil || "").toUpperCase() !== "CADASTRO";
     const link = '<a href="/almoxarifado" class="almoxarifado-nav-link"><span class="nav-icone">▤</span><span>Almoxarifado</span></a>';
-    const chat = '<a href="/almoxarifado/chat"><span class="nav-icone">💬</span><span>Chat da equipe</span></a>';
+    const chat = '<a href="/digital/chat-equipe"><span class="nav-icone">💬</span><span>Chat Geral</span></a>';
 
     if (almoxarife) {
       let bloco = 0;
@@ -1076,14 +1025,6 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
       updated = updated.replace(re,(whole,open,inner,close)=>open+inner+link+close);
     }
 
-    if (gestor && !almoxarife && !updated.includes('href="/almoxarifado/chat"')) {
-      let seen=0;
-      updated = updated.replace(/(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/g,(whole,open,inner,close)=>{
-        seen++;
-        if(seen===2)return open+inner+chat+close;
-        return whole;
-      });
-    }
   }
 
   const headers = new Headers(response.headers);

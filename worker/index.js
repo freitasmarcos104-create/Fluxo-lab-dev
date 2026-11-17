@@ -1,4 +1,4 @@
-// FLUXO LAB V5.12.0 — ponto de entrada único
+// FLUXO LAB V5.13.0 — ponto de entrada único
 // O Worker legado continua responsável por toda a aplicação existente.
 // O Almoxarifado é interceptado aqui e compartilha autenticação, D1 e deploy oficiais.
 import legado from "./legacy.js";
