@@ -103,7 +103,7 @@ test('rota GET direta do trabalho carrega paciente, etapas e componentes com per
 });
 
 
-import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, setoresDisponiveisAlmox } from "../worker/modules/almoxarifado.js";
+import { escaparHtmlAlmox, sinalMovimentoAlmox, handleAlmoxarifado, setoresDisponiveisAlmox, podeGerenciarAlmox } from "../worker/modules/almoxarifado.js";
 
 test("Almoxarifado escapa texto antes de inserir dados no HTML", () => {
   assert.equal(escaparHtmlAlmox("<script>&\"'"), "&lt;script&gt;&amp;&quot;&#39;");
@@ -158,4 +158,23 @@ test("requisições respeitam os setores vinculados ao usuário", () => {
     ["CONVENCIONAL:ACRILIZACAO"]
   );
   assert.ok(setoresDisponiveisAlmox({ perfil: "ADMINISTRADOR" }).includes("CONVENCIONAL:QUALIDADE"));
+});
+
+test("somente o vínculo ativo de almoxarife concede gestão do estoque", async () => {
+  const admin = { id: 1, perfil: "ADMINISTRADOR" };
+  const coord = { id: 2, perfil: "COORDENADOR" };
+  const ordinary = { id: 3, perfil: "FUNCIONARIO" };
+  const assigned = { id: 4, perfil: "FUNCIONARIO" };
+  const env = { db: { prepare(sql) { return { bind(id) { return { first: async () => sql.includes("almoxarifado_equipe") && id === 4 ? { 1: 1 } : null }; } }; } } };
+  assert.equal(await podeGerenciarAlmox(env, admin), true);
+  assert.equal(await podeGerenciarAlmox(env, coord), true);
+  assert.equal(await podeGerenciarAlmox(env, ordinary), false);
+  assert.equal(await podeGerenciarAlmox(env, assigned), true);
+});
+
+test("conta de almoxarife usa área independente e não ganha acesso de produção", async () => {
+  const source = await readFile(new URL("../worker/modules/almoxarifado.js", import.meta.url), "utf8");
+  assert.match(source, /'ALMOXARIFADO','ALMOXARIFADO',NULL,'FUNCIONARIO',1,0/);
+  assert.match(source, /id="painel-equipe-almox"/);
+  assert.match(source, /processarEquipeAlmoxarifado/);
 });
