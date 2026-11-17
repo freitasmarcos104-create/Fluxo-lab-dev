@@ -1,4 +1,4 @@
-import { obterUsuarioLogado } from "../core/auth.js";
+import { obterUsuarioLogado, criarHashSenha } from "../core/auth.js";
 import { cabecalhosSegurancaV30, htmlResponse } from "../core/http.js";
 
 const TIPOS_ITEM = ["REAGENTE", "PADRAO", "CONSUMIVEL", "KIT", "VIDRARIA", "EPI"];
@@ -14,6 +14,20 @@ const SETORES_VALIDOS = [
 
 function gerenteAlmox(user) {
   return ["ADMINISTRADOR", "COORDENADOR"].includes(String(user?.perfil || "").toUpperCase());
+}
+
+export async function podeGerenciarAlmox(env, user) {
+  if (!user) return false;
+  if (gerenteAlmox(user)) return true;
+  const vinculo = await primeiro(env.db, `
+    SELECT 1
+    FROM almoxarifado_equipe ae
+    INNER JOIN usuarios u ON u.id=ae.usuario_id
+    WHERE ae.usuario_id=? AND ae.funcao='ALMOXARIFE' AND ae.ativo=1
+      AND u.ativo=1 AND u.excluido=0 AND u.perfil='FUNCIONARIO'
+    LIMIT 1
+  `, Number(user.id));
+  return Boolean(vinculo);
 }
 
 export function escaparHtmlAlmox(value) {
@@ -461,7 +475,7 @@ function layoutAlmox(user, view, content, gerente, notice = "") {
 
 async function renderView(env, user, url) {
   const view = String(url.searchParams.get("view") || "dashboard");
-  const gerente = gerenteAlmox(user);
+  const gerente = await podeGerenciarAlmox(env,user);
   const itens = await dadosItens(env,url.searchParams.get("q"));
   const lotes = await dadosLotes(env);
   let content = "";
@@ -530,7 +544,7 @@ async function processarFormulario(request, env, user) {
   const form = await request.formData();
   const action = String(form.get("acao") || "");
   const get = (key) => String(form.get(key) ?? "").trim();
-  if (!gerenteAlmox(user) && action !== "requisitar") throw new Error("Ação restrita à administração e coordenação.");
+  if (!(await podeGerenciarAlmox(env,user)) && action !== "requisitar") throw new Error("Ação restrita aos responsáveis do Almoxarifado.");
   if (action === "criar_item") {
     await criarItem(env,user,{codigo:get("codigo"),nome:get("nome"),tipo:get("tipo"),unidade:get("unidade"),local_padrao:get("local_padrao"),quantidade_minima:get("quantidade_minima"),controla_lote:form.get("controla_lote")==="1"});
     return "/almoxarifado?view=itens&ok=" + encodeURIComponent("Item cadastrado.");
@@ -564,35 +578,161 @@ async function processarFormulario(request, env, user) {
 
 async function handleApi(request, env, url, user) {
   const path = url.pathname;
+  const gerente = await podeGerenciarAlmox(env,user);
   if (request.method === "GET" && path === "/almoxarifado/api/painel") return respostaJson(await dadosPainel(env));
   if (request.method === "GET" && path === "/almoxarifado/api/itens") return respostaJson(await dadosItens(env,url.searchParams.get("q")));
   if (request.method === "GET" && path === "/almoxarifado/api/lotes") return respostaJson(await dadosLotes(env,url.searchParams.get("item_id")));
   if (request.method === "GET" && path === "/almoxarifado/api/requisicoes") return respostaJson(await dadosRequisicoes(env));
   if (request.method === "GET" && path === "/almoxarifado/api/movimentos") return respostaJson(await dadosMovimentos(env));
   if (request.method === "POST" && path === "/almoxarifado/api/itens") {
-    if (!gerenteAlmox(user)) return respostaJson({erro:"Acesso restrito."},403);
+    if (!gerente) return respostaJson({erro:"Acesso restrito aos responsáveis do Almoxarifado."},403);
     await criarItem(env,user,await lerJson(request)); return respostaJson({ok:true},201);
   }
   if (request.method === "POST" && path === "/almoxarifado/api/entrada") {
-    if (!gerenteAlmox(user)) return respostaJson({erro:"Acesso restrito."},403);
+    if (!gerente) return respostaJson({erro:"Acesso restrito aos responsáveis do Almoxarifado."},403);
     await receberMaterial(env,user,await lerJson(request)); return respostaJson({ok:true},201);
   }
   if (request.method === "POST" && path === "/almoxarifado/api/requisicoes") {
     await criarRequisicao(env,user,await lerJson(request)); return respostaJson({ok:true},201);
   }
   if (request.method === "POST" && path === "/almoxarifado/api/atender") {
-    if (!gerenteAlmox(user)) return respostaJson({erro:"Acesso restrito."},403);
+    if (!gerente) return respostaJson({erro:"Acesso restrito aos responsáveis do Almoxarifado."},403);
     await atenderRequisicao(env,user,await lerJson(request)); return respostaJson({ok:true},201);
   }
   if (request.method === "POST" && path === "/almoxarifado/api/inventario/ajuste") {
-    if (!gerenteAlmox(user)) return respostaJson({erro:"Acesso restrito."},403);
+    if (!gerente) return respostaJson({erro:"Acesso restrito aos responsáveis do Almoxarifado."},403);
     await ajustarInventario(env,user,await lerJson(request)); return respostaJson({ok:true},201);
   }
   if (request.method === "POST" && path === "/almoxarifado/api/movimentos") {
-    if (!gerenteAlmox(user)) return respostaJson({erro:"Acesso restrito."},403);
+    if (!gerente) return respostaJson({erro:"Acesso restrito aos responsáveis do Almoxarifado."},403);
     await registrarMovimentoEspecial(env,user,await lerJson(request)); return respostaJson({ok:true},201);
   }
   return respostaJson({erro:"Rota do Almoxarifado não encontrada."},404);
+}
+
+async function listarEquipeAlmoxarifado(env) {
+  return todos(env.db, \`
+    SELECT u.id,u.nome,u.usuario,u.ativo,u.excluido,
+      ae.funcao AS funcao_almox,ae.ativo AS almox_ativo
+    FROM usuarios u
+    LEFT JOIN almoxarifado_equipe ae ON ae.usuario_id=u.id
+    WHERE u.perfil='FUNCIONARIO' AND u.excluido=0
+    ORDER BY u.ativo DESC,u.nome COLLATE NOCASE
+  \`);
+}
+
+function renderPainelEquipeAlmoxarifado(usuarios) {
+  const ativos = usuarios.filter((u) => Number(u.ativo) === 1 && Number(u.almox_ativo) === 1);
+  const disponiveis = usuarios.filter((u) => Number(u.ativo) === 1 && Number(u.almox_ativo || 0) !== 1);
+  const linhas = ativos.length ? ativos.map((u) =>
+    '<tr><td><strong>' + escaparHtmlAlmox(u.nome) + '</strong><div class="mini">' + escaparHtmlAlmox(u.usuario) +
+    '</div></td><td><span class="badge ok">Almoxarife</span></td><td><form method="POST" action="/almoxarifado/equipe/remover" class="acao-inline">' +
+    '<input type="hidden" name="usuario_id" value="' + Number(u.id) + '">' +
+    '<button class="botao-perigo" onclick="return confirm(\\'Remover a função de Almoxarife deste funcionário? A conta continuará ativa.\\')">Remover função</button>' +
+    '</form></td></tr>'
+  ).join("") : '<tr><td colspan="3">Nenhum almoxarife designado.</td></tr>';
+  const opcoes = disponiveis.map((u) =>
+    '<option value="' + Number(u.id) + '">' + escaparHtmlAlmox(u.nome + " · " + u.usuario) + '</option>'
+  ).join("");
+  return '<section id="painel-equipe-almox" class="card" style="margin:18px 0;padding:18px;border:1px solid #2872c8;border-radius:14px">' +
+    '<div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">' +
+    '<div><h3 style="margin:0 0 5px">Equipe do Almoxarifado</h3>' +
+    '<p class="nota" style="margin:0">Cadastre um funcionário exclusivo do estoque ou atribua a função a alguém já cadastrado. A função não concede acesso à produção.</p></div>' +
+    '<span class="badge neutro">' + ativos.length + ' responsável(is)</span></div>' +
+    '<div class="form-grid" style="margin-top:16px">' +
+    '<div style="min-width:0"><h4>Cadastrar novo almoxarife</h4>' +
+    '<form method="POST" action="/almoxarifado/equipe/criar"><div class="form-grid">' +
+    '<label>Nome<input name="nome" required minlength="2" maxlength="100"></label>' +
+    '<label>Usuário<input name="usuario" required minlength="3" maxlength="40" autocomplete="username"></label>' +
+    '<label>Senha inicial<input type="password" name="senha" required minlength="6" autocomplete="new-password"></label>' +
+    '<div class="full"><button type="submit">Cadastrar almoxarife</button></div></div></form></div>' +
+    '<div style="min-width:0"><h4>Designar funcionário existente</h4>' +
+    (opcoes ? '<form method="POST" action="/almoxarifado/equipe/atribuir"><div class="form-grid">' +
+      '<label>Funcionário<select name="usuario_id" required><option value="">Selecione</option>' + opcoes + '</select></label>' +
+      '<div class="full"><button type="submit">Atribuir função de Almoxarife</button></div></div></form>' :
+      '<p class="nota">Todos os funcionários ativos já possuem a função ou não há funcionários disponíveis.</p>') +
+    '</div></div>' +
+    '<h4 style="margin:20px 0 8px">Responsáveis atuais</h4>' +
+    '<div class="tabela-wrap"><table><thead><tr><th>Funcionário</th><th>Função</th><th>Ação</th></tr></thead><tbody>' + linhas + '</tbody></table></div>' +
+    '</section>';
+}
+
+async function processarEquipeAlmoxarifado(request, env, user, path) {
+  if (!gerenteAlmox(user)) throw new Error("Somente Administrador ou Coordenador pode administrar a equipe do Almoxarifado.");
+  if (request.method !== "POST") throw new Error("Método não permitido.");
+  const form = await request.formData();
+  const get = (key) => String(form.get(key) ?? "").trim();
+  if (path === "/almoxarifado/equipe/criar") {
+    const nome = get("nome").slice(0,100);
+    const login = get("usuario").toLowerCase().slice(0,40);
+    const senha = String(form.get("senha") || "");
+    if (nome.length < 2 || login.length < 3 || !/^[a-z0-9._-]+$/.test(login) || senha.length < 6) {
+      throw new Error("Informe nome, usuário válido e senha com pelo menos seis caracteres.");
+    }
+    const duplicado = await primeiro(env.db,"SELECT id FROM usuarios WHERE lower(usuario)=? LIMIT 1",login);
+    if (duplicado) throw new Error("Esse nome de usuário já está cadastrado.");
+    const hash = await criarHashSenha(senha);
+    const r = await executar(env.db, \`
+      INSERT INTO usuarios
+        (nome,usuario,senha_hash,setor,area_producao,setor_convencional,perfil,ativo,excluido)
+      VALUES (?,?,?,'ALMOXARIFADO','ALMOXARIFADO',NULL,'FUNCIONARIO',1,0)
+    \`,nome,login,hash);
+    const id = Number(r?.meta?.last_row_id || 0);
+    if (!id) throw new Error("A conta foi criada sem retornar o identificador. Verifique a Equipe antes de repetir.");
+    try {
+      await executar(env.db, \`
+        INSERT INTO almoxarifado_equipe (usuario_id,funcao,ativo,atribuido_por)
+        VALUES (?,'ALMOXARIFE',1,?)
+      \`,id,Number(user.id));
+    } catch (error) {
+      await executar(env.db,"UPDATE usuarios SET ativo=0,excluido=1 WHERE id=?",id);
+      throw new Error("Não foi possível atribuir a função de Almoxarife. A conta recém-criada foi desativada para evitar acesso incompleto. " + String(error?.message || ""));
+    }
+    return "/funcionarios?ok=" + encodeURIComponent("Almoxarife cadastrado. A conta não recebeu acesso aos setores de produção.");
+  }
+  if (path === "/almoxarifado/equipe/atribuir") {
+    const id = Number(get("usuario_id"));
+    const funcionario = await primeiro(env.db,
+      "SELECT id FROM usuarios WHERE id=? AND perfil='FUNCIONARIO' AND ativo=1 AND excluido=0",id);
+    if (!funcionario) throw new Error("Selecione um funcionário ativo.");
+    await executar(env.db, \`
+      INSERT INTO almoxarifado_equipe (usuario_id,funcao,ativo,atribuido_por)
+      VALUES (?,'ALMOXARIFE',1,?)
+      ON CONFLICT(usuario_id) DO UPDATE SET
+        funcao='ALMOXARIFE',ativo=1,atribuido_por=excluded.atribuido_por,
+        atualizado_em=CURRENT_TIMESTAMP
+    \`,id,Number(user.id));
+    return "/funcionarios?ok=" + encodeURIComponent("Função de Almoxarife atribuída ao funcionário.");
+  }
+  if (path === "/almoxarifado/equipe/remover") {
+    const id = Number(get("usuario_id"));
+    const result = await executar(env.db,
+      "UPDATE almoxarifado_equipe SET ativo=0,atualizado_em=CURRENT_TIMESTAMP WHERE usuario_id=? AND ativo=1",id);
+    if (Number(result?.meta?.changes || 0) < 1) throw new Error("Funcionário não possui uma função ativa de Almoxarife.");
+    return "/funcionarios?ok=" + encodeURIComponent("Função de Almoxarife removida. A conta e o histórico do funcionário foram preservados.");
+  }
+  throw new Error("Ação da equipe do Almoxarifado não reconhecida.");
+}
+
+export async function injetarGestaoEquipeAlmoxarifado(response, request, env) {
+  const url = new URL(request.url);
+  if (!response || response.status !== 200 || request.method !== "GET" || url.pathname !== "/funcionarios") return response;
+  const user = await obterUsuarioLogado(request,env);
+  if (!gerenteAlmox(user)) return response;
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("text/html")) return response;
+  const original = await response.text();
+  if (original.includes('id="painel-equipe-almox"')) return new Response(original,{status:response.status,statusText:response.statusText,headers:response.headers});
+  const painel = renderPainelEquipeAlmoxarifado(await listarEquipeAlmoxarifado(env));
+  const mainEnd = original.lastIndexOf("</main>");
+  const bodyEnd = original.lastIndexOf("</body>");
+  const pos = mainEnd >= 0 ? mainEnd : bodyEnd;
+  if (pos < 0) return new Response(original,{status:response.status,statusText:response.statusText,headers:response.headers});
+  const updated = original.slice(0,pos) + painel + original.slice(pos);
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  return new Response(updated,{status:response.status,statusText:response.statusText,headers});
 }
 
 export async function handleAlmoxarifado(request, env, url) {
@@ -616,7 +756,7 @@ export async function handleAlmoxarifado(request, env, url) {
       return redirecionar(await processarFormulario(request,env,user));
     }
     if (request.method === "GET" && ["/almoxarifado","/almoxarifado/"].includes(url.pathname)) return await renderView(env,user,url);
-    return respostaHtml(layoutAlmox(user,"dashboard",'<section class="panel"><p>Endereço não encontrado.</p></section>',gerenteAlmox(user)),404);
+    return respostaHtml(layoutAlmox(user,"dashboard",'<section class="panel"><p>Endereço não encontrado.</p></section>',await podeGerenciarAlmox(env,user)),404);
   } catch (error) {
     const message = String(error?.message || "Falha ao processar a operação.").slice(0,300);
     if (isApi) return respostaJson({erro:message},400);
