@@ -1,6 +1,20 @@
 -- Fluxo Lab V5.10.0 — Almoxarifado
 -- Migração aditiva. Não altera tabelas existentes nem dados atuais.
 -- O saldo é derivado exclusivamente de almoxarifado_movimentos.
+-- A equipe do Almoxarifado é independente dos setores de produção Digital/Convencional.
+
+CREATE TABLE almoxarifado_equipe (
+  usuario_id INTEGER PRIMARY KEY,
+  funcao TEXT NOT NULL DEFAULT 'ALMOXARIFE' CHECK (funcao='ALMOXARIFE'),
+  ativo INTEGER NOT NULL DEFAULT 1 CHECK (ativo IN (0,1)),
+  atribuido_por INTEGER NOT NULL,
+  criado_em TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  atualizado_em TEXT,
+  FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE RESTRICT,
+  FOREIGN KEY (atribuido_por) REFERENCES usuarios(id) ON DELETE RESTRICT
+);
+
+CREATE INDEX idx_almox_equipe_ativos ON almoxarifado_equipe(ativo,funcao);
 
 CREATE TABLE almoxarifado_itens (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
