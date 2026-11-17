@@ -137,13 +137,13 @@ test("migração protege saldo, validade e imutabilidade diretamente no D1", asy
   assert.match(sql, /trg_almox_movimentos_nao_atualizar/);
   assert.match(sql, /trg_almox_movimentos_nao_apagar/);
   assert.match(sql, /trg_almox_limite_atendimento/);
-  assert.doesNotMatch(sql, /CREATE TABLE[^;]*saldo\\s+REAL/i);
+  assert.ok(!sql.includes("saldo REAL"));
 });
 
 test("ponto de entrada encaminha somente o Almoxarifado e preserva o Worker legado", async () => {
   const source = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
-  assert.match(source, /import legado from "\\.\/legacy\\.js"/);
+  assert.ok(source.includes('import legado from "./legacy.js"'));
   assert.match(source, /return handleAlmoxarifado/);
-  assert.match(source, /legado\\.fetch\\(request, env, ctx\\)/);
+  assert.ok(source.includes("legado.fetch(request, env, ctx)"));
   assert.match(source, /injetarLinkAlmoxarifado/);
 });
