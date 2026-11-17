@@ -296,7 +296,8 @@ test("o menu Almoxarifado separa a área operacional do espaço do colaborador",
   assert.match(source, /Chat da equipe/);
   assert.match(source, /Comunicação e solicitações/);
   assert.match(source, /if \(bloco === 1\) return open \+ link \+ close/);
-  assert.match(source, /if \(bloco === 2\)/);\n  assert.match(source, /nav-bloco-v325.*open/);
+  assert.match(source, /if \(bloco === 2\)/);
+  assert.match(source, /nav-bloco-v325.*open/);
 });
 
 test("o Almoxarifado possui chat próprio e não usa o chat da produção Digital", async () => {
