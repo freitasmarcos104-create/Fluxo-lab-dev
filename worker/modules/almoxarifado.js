@@ -1006,6 +1006,9 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
         return whole;
       });
       updated = updated.replace(/<a\b[^>]*href="\/digital\/chat-equipe"[^>]*>[\s\S]*?<\/a>/gi,"");
+      // Abra os dois grupos do menu para que Almoxarifado e Espaço do Colaborador
+      // fiquem visíveis logo após o login, sem o usuário precisar expandir seções.
+      updated = updated.replace(/<details class="nav-bloco-v325"(?![^>]*\bopen\b)/g,'<details class="nav-bloco-v325" open');
     } else if (podeVerLink && !updated.includes('href="/almoxarifado"')) {
       const re = /(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/;
       updated = updated.replace(re,(whole,open,inner,close)=>open+inner+link+close);
