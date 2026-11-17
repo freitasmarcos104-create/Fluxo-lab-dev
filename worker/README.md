@@ -1,4 +1,4 @@
-# Fluxo Lab Worker V5.9.0
+# Fluxo Lab Worker V5.11.0
 
 Fonte oficial do Worker de produção. O navegador, o aplicativo Windows e o aplicativo Android acessam o mesmo sistema:
 
@@ -7,6 +7,10 @@ Fonte oficial do Worker de produção. O navegador, o aplicativo Windows e o apl
 - Código-fonte de desenvolvimento: este diretório worker/
 - Ponto de entrada: index.js
 - Módulos do Worker: core/, domains/, routes/, services/ e modules/
+
+## Novidade da V5.11.0
+
+O funcionário com vínculo ativo de Almoxarife entra diretamente no painel do Almoxarifado. O Worker bloqueia o acesso às páginas e APIs gerais do laboratório para esse perfil, mantendo disponível a saída da conta e os recursos necessários ao aplicativo instalado. Administradores e Coordenadores preservam a navegação administrativa normal.
 
 ## Novidade da V5.9.0
 
