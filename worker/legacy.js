@@ -164,7 +164,7 @@ async function listarChatEquipeDigitalV3420ServiceV54(env) {
       u.nome,
       u.perfil,
       COALESCE((
-        SELECT GROUP_CONCAT(us.setor, '|')
+        SELECT GROUP_CONCAT(us.area || ':' || us.setor, '|')
         FROM usuario_setores us
         WHERE us.usuario_id = u.id
           AND us.ativo = 1
@@ -14255,13 +14255,17 @@ ${linhas || `
   );
 }
 function siglaSetorChatDigitalV3420(setor) {
+  const partes = String(setor || "").toUpperCase().split(":", 2);
+  const area = partes.length > 1 ? partes[0] : "";
+  const codigo = partes.length > 1 ? partes[1] : partes[0];
   const mapa = {
     "CAD/CAM": "CAD", FATIAMENTO: "FAT", IMPRESSAO: "IMP", ACABAMENTO: "ACB",
     ARTICULACAO: "ART", MONTAGEM: "MONT", ENCERRAMENTO: "ENCR", ESCULTURA: "ESCU",
     INCLUSAO: "INCL", ACRILIZACAO: "ACRI", DESINCLUSAO: "DES", QUALIDADE: "QUAL",
     CONVENCIONAL: "CONV", ALMOXARIFADO: "ALMOX", DIGITAL: "DIG"
   };
-  return mapa[String(setor || "").toUpperCase()] || String(setor || "").slice(0, 5);
+  const sigla = mapa[codigo] || codigo.slice(0, 5);
+  return area === "CONVENCIONAL" ? "CONV " + sigla : sigla;
 }
 function seloAutorChatDigitalV3420(item) {
   if (item.perfil === "ADMINISTRADOR") return "👑 ADM";
@@ -14361,8 +14365,8 @@ function renderChatEquipeDigitalV3420(mensagens, usuario) {
 }
 function paginaChatEquipeDigitalV3420(usuario, mensagens, mensagem = "", tipo = "sucesso") {
   const setoresUsuario = [
-    ...setoresUsuarioV31(usuario, "DIGITAL").map(siglaSetorChatDigitalV3420),
-    ...setoresUsuarioV31(usuario, "CONVENCIONAL").map(siglaSetorChatDigitalV3420),
+    ...setoresUsuarioV31(usuario, "DIGITAL").map((setor) => siglaSetorChatDigitalV3420("DIGITAL:" + setor)),
+    ...setoresUsuarioV31(usuario, "CONVENCIONAL").map((setor) => siglaSetorChatDigitalV3420("CONVENCIONAL:" + setor)),
     ...(Number(usuario?.eh_almoxarife || 0) === 1 || String(usuario?.area_producao || "").toUpperCase() === "ALMOXARIFADO" ? ["ALMOX"] : [])
   ];
   const setores = usuario.perfil === "FUNCIONARIO"
@@ -14406,7 +14410,8 @@ function paginaChatEquipeDigitalV3420(usuario, mensagens, mensagem = "", tipo = 
       if(!caixa)return;
       const meuId=${Number(usuario?.id || 0)};
       const chaveSom='fluxolab-chat-geral-som-v35';
-      let somAtivo=localStorage.getItem(chaveSom)==='1';
+      let somAtivo=localStorage.getItem(chaveSom)==='1'||localStorage.getItem('fluxolab-chat-digital-som-v35')==='1';
+      if(somAtivo)localStorage.setItem(chaveSom,'1');
       let audioCtx=null;
       let audioLiberado=false;
       const maiorId=(raiz)=>Math.max(0,...[...raiz.querySelectorAll('[data-chat-id]')].map(el=>Number(el.dataset.chatId||0)));
