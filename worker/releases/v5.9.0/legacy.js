@@ -20221,9 +20221,7 @@ function paginaMinhasNotasV310(usuario, notas, mensagem = "", tipo = "sucesso") 
           <label>Título<input name="titulo" maxlength="80" value="${escapeHtml(n.titulo || "")}" placeholder="Título"></label>
           <label>Anotação</label>
           ${montarEditorNotaV590(conteudoHtml, "nota-" + Number(n.id))}
-          <div class="nota-acoes-v310">
-            <button type="submit">Salvar</button>
-          </div>
+          <div class="nota-acoes-v310"><button type="submit">Salvar</button></div>
         </form>
         <form method="POST" action="/minhas-notas/excluir" onsubmit="return confirm('Excluir esta anotação?');">
           <input type="hidden" name="id" value="${Number(n.id)}">
@@ -20254,7 +20252,6 @@ function paginaMinhasNotasV310(usuario, notas, mensagem = "", tipo = "sucesso") 
       .nota-editor-v590 mark[data-cor="blue"]{background:#BFDBFE;color:#1E3A8A;border-radius:3px;padding:0 2px}
       .nota-editor-rodape-v590{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12px;opacity:.75}
       .nota-editor-rodape-v590[data-limite="1"]{color:#dc2626;opacity:1}
-      .nota-editor-status-v590{color:#dc2626}
       .nota-form-v590{display:grid;gap:8px}
       @media(max-width:600px){.nota-editor-v590{min-height:130px}.nota-toolbar-ajuda-v590{width:100%;margin:2px 0 0}}
     </style>
@@ -25937,31 +25934,27 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!isCoord(usuario)) return textResponse("Somente Administrador/Coordenador pode cancelar uma cidade inteira.", 403);
     const id = Number(match[1]);
     const form = await request.formData();
-    const motivo = String(form.get("motivo") |if (metodo === "POST" && caminho === "/minhas-notas/salvar") {
+    const motivo = String(form.get("motivo") || "").trim();
+    if (motivo.length < 5) return textResponse("Informe o motivo do cancelamento.", 400);
+    const cidade = await env.db.prepare(`SELECT * FROM ciclo_municipios_convencionais WHERE id=? LIMIT 1`).bind(id).first();
+    if (!cidade) return textResponse("Cidade não encontrada.", 404);
+    const entrega = await env.db.prepare(`SELECT id FROM entregas_municipios_convencionais WHERE ciclo_municipio_id=? LIMIT 1`).bind(id).first();
+    if (entrega) return redirect(`/convencional?ciclo=${cidade.ciclo_id}&erro=${encodeURIComponent("Uma cidade já entregue não pode ser cancelada.")}`);
+    await env.db.prepare(`UPDATE ciclo_municipios_convencionais SET cancelado=1,cancelado_por=?,cancelado_em=CURRENT_TIMESTAMP,motivo_cancelamento=? WHERE id=?`).bind(usuario.id, motivo, id).run();
+    await registrarAuditoriaSistemaV31(env, usuario.id, "CONVENCIONAL", "CANCELAR_CIDADE", "CICLO_MUNICIPIO", id, "cancelado", "0", "1", motivo);
+    return redirect(`/convencional?ciclo=${cidade.ciclo_id}&ok=${encodeURIComponent("Cidade cancelada; histórico preservado.")}`);
+  }
+  match = caminho.match(/^\/convencional\/ciclos\/(\d+)\/encerrar$/);
+  if (metodo === "POST" && match) {
     const usuario = await obterUsuarioLogado(request, env);
     if (!usuario) return redirect("/");
+    if (!isCoord(usuario)) return textResponse("Somente Administrador/Coordenador pode encerrar ciclos.", 403);
+    const cicloId = Number(match[1]);
+    const ciclo = await obterCicloConvencional(env, cicloId);
+    if (!ciclo) return textResponse("Ciclo não encontrado.", 404);
     const form = await request.formData();
-    const id = Number(form.get("id"));
-    const titulo = String(form.get("titulo") || "").trim().slice(0, 80) || "Sem título";
-    const serializada = serializeRichNoteValue(String(form.get("conteudo") || ""));
-    if (serializada.tooLong) return redirect(`/minhas-notas?erro=${encodeURIComponent("A anotação ultrapassa o limite de 4.000 caracteres.")}`);
-    const conteudo = serializada.value;
-    if (serializada.empty && !(Number.isSafeInteger(id) && id > 0)) return redirect(`/minhas-notas?erro=${encodeURIComponent("Escreva alguma coisa antes de salvar.")}`);
-    const agora = new Date().toISOString();
-    try {
-      if (Number.isSafeInteger(id) && id > 0) {
-        const r = await env.db.prepare(`UPDATE usuario_notas_v310 SET titulo = ?, conteudo = ?, atualizado_em = ? WHERE id = ? AND usuario_id = ? AND excluida = 0`).bind(titulo, conteudo, agora, id, usuario.id).run();
-        if (!Number(r?.meta?.changes || 0)) return redirect(`/minhas-notas?erro=${encodeURIComponent("Anotação não encontrada.")}`);
-        return redirect(`/minhas-notas?ok=${encodeURIComponent("Anotação salva.")}`);
-      }
-      await env.db.prepare(`INSERT INTO usuario_notas_v310 (usuario_id, titulo, conteudo, criado_em, atualizado_em, excluida) VALUES (?, ?, ?, ?, ?, 0)`).bind(usuario.id, titulo, conteudo, agora, agora).run();
-      return redirect(`/minhas-notas?ok=${encodeURIComponent("Anotação criada.")}`);
-    } catch (erro) {
-      if (/no such table:\s*usuario_notas_v310/i.test(String(erro?.message || erro))) return redirect(`/minhas-notas?erro=${encodeURIComponent("Rode o comando do console da V3.10.0 primeiro.")}`);
-      throw erro;
-    }
-  }
-  = await listarCidadesCicloV31(env, cicloId);
+    const motivo = String(form.get("motivo") || "").trim();
+    const cidades = await listarCidadesCicloV31(env, cicloId);
     const pendentes = cidades.filter((c) => !["ENTREGUE", "CANCELADA"].includes(c.status_v31));
     if (pendentes.length && motivo.length < 5) {
       return redirect(`/convencional?ciclo=${cicloId}&erro=${encodeURIComponent(`Existem ${pendentes.length} cidade(s) pendente(s). Para encerramento excepcional, informe o motivo.`)}`);
@@ -26068,19 +26061,21 @@ async function rotearV31Base(request, env, url, caminho) {
     const form = await request.formData();
     const id = Number(form.get("id"));
     const titulo = String(form.get("titulo") || "").trim().slice(0, 80) || "Sem título";
-    const conteudo = String(form.get("conteudo") || "").trim().slice(0, 4e3);
-    if (!conteudo && !(Number.isSafeInteger(id) && id > 0)) return redirect(`/minhas-notas?erro=${encodeURIComponent("Escreva alguma coisa antes de salvar.")}`);
-    const agora = (/* @__PURE__ */ new Date()).toISOString();
+    const serializada = serializeRichNoteValue(String(form.get("conteudo") || ""));
+    if (serializada.tooLong) return redirect("/minhas-notas?erro=" + encodeURIComponent("A anotação ultrapassa o limite de 4.000 caracteres."));
+    const conteudo = serializada.value;
+    if (serializada.empty && !(Number.isSafeInteger(id) && id > 0)) return redirect("/minhas-notas?erro=" + encodeURIComponent("Escreva alguma coisa antes de salvar."));
+    const agora = new Date().toISOString();
     try {
       if (Number.isSafeInteger(id) && id > 0) {
-        const r = await env.db.prepare(`UPDATE usuario_notas_v310 SET titulo = ?, conteudo = ?, atualizado_em = ? WHERE id = ? AND usuario_id = ? AND excluida = 0`).bind(titulo, conteudo, agora, id, usuario.id).run();
-        if (!Number(r?.meta?.changes || 0)) return redirect(`/minhas-notas?erro=${encodeURIComponent("Anotação não encontrada.")}`);
-        return redirect(`/minhas-notas?ok=${encodeURIComponent("Anotação salva.")}`);
+        const r = await env.db.prepare("UPDATE usuario_notas_v310 SET titulo = ?, conteudo = ?, atualizado_em = ? WHERE id = ? AND usuario_id = ? AND excluida = 0").bind(titulo, conteudo, agora, id, usuario.id).run();
+        if (!Number(r?.meta?.changes || 0)) return redirect("/minhas-notas?erro=" + encodeURIComponent("Anotação não encontrada."));
+        return redirect("/minhas-notas?ok=" + encodeURIComponent("Anotação salva."));
       }
-      await env.db.prepare(`INSERT INTO usuario_notas_v310 (usuario_id, titulo, conteudo, criado_em, atualizado_em, excluida) VALUES (?, ?, ?, ?, ?, 0)`).bind(usuario.id, titulo, conteudo, agora, agora).run();
-      return redirect(`/minhas-notas?ok=${encodeURIComponent("Anotação criada.")}`);
+      await env.db.prepare("INSERT INTO usuario_notas_v310 (usuario_id, titulo, conteudo, criado_em, atualizado_em, excluida) VALUES (?, ?, ?, ?, ?, 0)").bind(usuario.id, titulo, conteudo, agora, agora).run();
+      return redirect("/minhas-notas?ok=" + encodeURIComponent("Anotação criada."));
     } catch (erro) {
-      if (/no such table:\s*usuario_notas_v310/i.test(String(erro?.message || erro))) return redirect(`/minhas-notas?erro=${encodeURIComponent("Rode o comando do console da V3.10.0 primeiro.")}`);
+      if (/no such table:\s*usuario_notas_v310/i.test(String(erro?.message || erro))) return redirect("/minhas-notas?erro=" + encodeURIComponent("Rode o comando do console da V3.10.0 primeiro."));
       throw erro;
     }
   }
