@@ -60,11 +60,26 @@ class AlmoxarifadoMigrationTests(unittest.TestCase):
             "SELECT name FROM sqlite_master WHERE type IN ('table','view')"
         )}
         self.assertTrue({
-            "almoxarifado_itens", "almoxarifado_lotes", "almoxarifado_movimentos",
+            "almoxarifado_equipe", "almoxarifado_itens", "almoxarifado_lotes", "almoxarifado_movimentos",
             "almoxarifado_requisicoes", "almoxarifado_requisicao_itens",
             "almoxarifado_saldos_lotes", "almoxarifado_saldos_itens",
             "almoxarifado_status_requisicoes",
         }.issubset(names))
+
+    def test_almoxarifado_team_is_separate_from_production_areas(self):
+        columns = {row[1] for row in self.db.execute("PRAGMA table_info(almoxarifado_equipe)")}
+        self.assertTrue({"usuario_id", "funcao", "ativo", "atribuido_por"}.issubset(columns))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(
+                "INSERT INTO almoxarifado_equipe (usuario_id,funcao,ativo,atribuido_por) VALUES (1,'GERENCIA',1,1)"
+            )
+        self.db.execute(
+            "INSERT INTO almoxarifado_equipe (usuario_id,funcao,ativo,atribuido_por) VALUES (1,'ALMOXARIFE',1,1)"
+        )
+        self.db.execute("UPDATE almoxarifado_equipe SET ativo=0 WHERE usuario_id=1")
+        self.assertEqual(
+            self.db.execute("SELECT ativo FROM almoxarifado_equipe WHERE usuario_id=1").fetchone()[0], 0
+        )
 
     def test_reagents_standards_and_kits_must_control_lot_and_expiry(self):
         for tipo in ("REAGENTE", "PADRAO", "KIT"):
