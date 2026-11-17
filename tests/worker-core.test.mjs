@@ -220,10 +220,10 @@ test("conta de almoxarife usa área independente e não ganha acesso de produç�
 });
 
 test("interface identifica a versão 5.13.0 nas páginas HTML", () => {
-  const html = '<title>Fluxo Lab V5.9.0</title><span>V5.10.0 · V5.11.0</span>';
+  const html = '<title>Fluxo Lab V5.9.0</title><span>V5.10.0 · V5.11.0 · V5.12.0</span>';
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(html, "/funcionarios"),
-    '<title>Fluxo Lab V5.12.0</title><span>V5.12.0 · V5.13.0</span>'
+    '<title>Fluxo Lab V5.13.0</title><span>V5.13.0 · V5.13.0 · V5.13.0</span>'
   );
 });
 
@@ -242,7 +242,7 @@ test("injeta menu e versão atualizada no HTML servido pelo Worker legado", asyn
     new Request("https://app.markfree.com.br/funcionarios")
   );
   const html = await response.text();
-  assert.match(html, /V5.12.0/);
+  assert.match(html, /V5.13.0/);
   assert.match(html, /href="\/almoxarifado"/);
   assert.equal(response.headers.get("content-length"), null);
 });
@@ -251,7 +251,7 @@ test("injeta menu e versão atualizada no HTML servido pelo Worker legado", asyn
 
 test("Espaço do Colaborador do Almoxarife preserva ferramentas pessoais sem mostrar produção", () => {
   const html = renderEspacoColaboradorAlmoxarife({nome:"Yan"});
-  assert.match(html, /Chat da equipe/);
+  assert.match(html, /Chat Geral do Fluxo Lab/);
   assert.match(html, /Comunicação e solicitações/);
   assert.match(html, /Agenda e tarefas/);
   assert.match(html, /Minhas anotações/);
@@ -295,7 +295,7 @@ test("o menu Almoxarifado separa a área operacional do espaço do colaborador",
   const source = await readFile(new URL("../worker/modules/almoxarifado.js", import.meta.url), "utf8");
   assert.match(source, /if \(almoxarife\) \{/);
   assert.match(source, /Meu Espaço/);
-  assert.match(source, /Chat da equipe/);
+  assert.match(source, /Chat Geral/);
   assert.match(source, /Comunicação e solicitações/);
   assert.match(source, /if \(bloco === 1\) return open \+ link \+ close/);
   assert.match(source, /if \(bloco === 2\)/);
@@ -305,13 +305,13 @@ test("o menu Almoxarifado separa a área operacional do espaço do colaborador",
 test("Almoxarife usa o Chat Geral compartilhado com os outros setores", async () => {
   const source = await readFile(new URL("../worker/modules/almoxarifado.js", import.meta.url), "utf8");
   const legacy = await readFile(new URL("../worker/legacy.js", import.meta.url), "utf8");
-  const entry = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
   assert.match(source, /Chat Geral do Fluxo Lab/);
   assert.match(source, /href="\/digital\/chat-equipe"/);
+  assert.match(source, /"\/digital\/chat-equipe"/);
+  assert.match(source, /"\/api\/digital\/chat-equipe"/);
   assert.doesNotMatch(source, /almoxarifado_chat_mensagens|processarChatAlmoxarifado|\/almoxarifado\/chat/);
   assert.match(legacy, /return podeUsarMensagensPrivadasV3420\(usuario\);/);
   assert.match(legacy, /Chat Geral do Fluxo Lab/);
-  assert.match(entry, /digital\/chat-equipe/);
 });
 
 test("a atualização conserva apenas um ponto de entrada e integra o shell oficial", async () => {
