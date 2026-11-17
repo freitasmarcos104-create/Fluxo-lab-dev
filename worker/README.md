@@ -1,10 +1,14 @@
-# Fluxo Lab Worker V5.13.0
+# Fluxo Lab Worker V5.13.1
 
 Fonte oficial do Worker de produção. Navegador, Windows e Android continuam usando o mesmo Worker e banco.
 
 - Endereço oficial: https://app.markfree.com.br/
 - Worker: fluxo-lab
 - Ponto de entrada: worker/index.js
+
+## Novidade da V5.13.1
+
+Corrige a montagem do menu do Almoxarife: o link do Chat Geral permanece visível no grupo Espaço do Colaborador. A remoção de links antigos ocorre antes da inserção do menu reconstruído.
 
 ## Novidade da V5.13.0
 
