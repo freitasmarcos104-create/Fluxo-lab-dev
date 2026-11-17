@@ -20210,7 +20210,6 @@ function montarEditorNotaV590(conteudoHtml, identificador) {
 function paginaMinhasNotasV310(usuario, notas, mensagem = "", tipo = "sucesso") {
   const lista = notas.map((n) => {
     const conteudoHtml = renderRichNoteValue(n.conteudo, escapeHtml);
-    const quantidade = countRichNoteCharacters(n.conteudo);
     return `
       <article class="nota-item-v310">
         <div class="nota-cabecalho-v310">
@@ -20224,7 +20223,6 @@ function paginaMinhasNotasV310(usuario, notas, mensagem = "", tipo = "sucesso") 
           ${montarEditorNotaV590(conteudoHtml, "nota-" + Number(n.id))}
           <div class="nota-acoes-v310">
             <button type="submit">Salvar</button>
-            <span class="mini">${quantidade} caracteres</span>
           </div>
         </form>
         <form method="POST" action="/minhas-notas/excluir" onsubmit="return confirm('Excluir esta anotação?');">
@@ -25946,20 +25944,20 @@ async function rotearV31Base(request, env, url, caminho) {
     const id = Number(form.get("id"));
     const titulo = String(form.get("titulo") || "").trim().slice(0, 80) || "Sem título";
     const serializada = serializeRichNoteValue(String(form.get("conteudo") || ""));
-    if (serializada.tooLong) return redirect(\`/minhas-notas?erro=${encodeURIComponent("A anotação ultrapassa o limite de 4.000 caracteres.")}\`);
+    if (serializada.tooLong) return redirect(`/minhas-notas?erro=${encodeURIComponent("A anotação ultrapassa o limite de 4.000 caracteres.")}`);
     const conteudo = serializada.value;
-    if (serializada.empty && !(Number.isSafeInteger(id) && id > 0)) return redirect(\`/minhas-notas?erro=${encodeURIComponent("Escreva alguma coisa antes de salvar.")}\`);
+    if (serializada.empty && !(Number.isSafeInteger(id) && id > 0)) return redirect(`/minhas-notas?erro=${encodeURIComponent("Escreva alguma coisa antes de salvar.")}`);
     const agora = new Date().toISOString();
     try {
       if (Number.isSafeInteger(id) && id > 0) {
-        const r = await env.db.prepare(\`UPDATE usuario_notas_v310 SET titulo = ?, conteudo = ?, atualizado_em = ? WHERE id = ? AND usuario_id = ? AND excluida = 0\`).bind(titulo, conteudo, agora, id, usuario.id).run();
-        if (!Number(r?.meta?.changes || 0)) return redirect(\`/minhas-notas?erro=${encodeURIComponent("Anotação não encontrada.")}\`);
-        return redirect(\`/minhas-notas?ok=${encodeURIComponent("Anotação salva.")}\`);
+        const r = await env.db.prepare(`UPDATE usuario_notas_v310 SET titulo = ?, conteudo = ?, atualizado_em = ? WHERE id = ? AND usuario_id = ? AND excluida = 0`).bind(titulo, conteudo, agora, id, usuario.id).run();
+        if (!Number(r?.meta?.changes || 0)) return redirect(`/minhas-notas?erro=${encodeURIComponent("Anotação não encontrada.")}`);
+        return redirect(`/minhas-notas?ok=${encodeURIComponent("Anotação salva.")}`);
       }
-      await env.db.prepare(\`INSERT INTO usuario_notas_v310 (usuario_id, titulo, conteudo, criado_em, atualizado_em, excluida) VALUES (?, ?, ?, ?, ?, 0)\`).bind(usuario.id, titulo, conteudo, agora, agora).run();
-      return redirect(\`/minhas-notas?ok=${encodeURIComponent("Anotação criada.")}\`);
+      await env.db.prepare(`INSERT INTO usuario_notas_v310 (usuario_id, titulo, conteudo, criado_em, atualizado_em, excluida) VALUES (?, ?, ?, ?, ?, 0)`).bind(usuario.id, titulo, conteudo, agora, agora).run();
+      return redirect(`/minhas-notas?ok=${encodeURIComponent("Anotação criada.")}`);
     } catch (erro) {
-      if (/no such table:\\s*usuario_notas_v310/i.test(String(erro?.message || erro))) return redirect(\`/minhas-notas?erro=${encodeURIComponent("Rode o comando do console da V3.10.0 primeiro.")}\`);
+      if (/no such table:\s*usuario_notas_v310/i.test(String(erro?.message || erro))) return redirect(`/minhas-notas?erro=${encodeURIComponent("Rode o comando do console da V3.10.0 primeiro.")}`);
       throw erro;
     }
   }

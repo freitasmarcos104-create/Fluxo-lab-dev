@@ -1,3 +1,5 @@
+// FLUXO LAB V5.9.0 — EDITOR DE ANOTAÇÕES FORMATADAS
+import { renderRichNoteValue, countRichNoteCharacters, serializeRichNoteValue } from "./modules/rich-notes.js";
 async function listarChatServiceV54(env, trabalhoId) {
   const resultado = await env.db.prepare(`
 
@@ -5437,7 +5439,7 @@ async function totalRealBucketV32ServiceV51(bucket) {
   } while (cursor);
   return { total_bytes: total, quantidade };
 }
-const VERSAO_FLUXO_LAB = "5.8.9";
+const VERSAO_FLUXO_LAB = "5.9.0";
 const MODO_CONVENCIONAL_ATIVO = false;
 new TextEncoder();
 const SETORES = [
@@ -20186,41 +20188,183 @@ async function carregarNotasV310(env, usuarioId) {
   const r = await env.db.prepare(`SELECT id, titulo, conteudo, criado_em, atualizado_em FROM usuario_notas_v310 WHERE usuario_id = ? AND excluida = 0 ORDER BY atualizado_em DESC, id DESC LIMIT 200`).bind(usuarioId).all();
   return r.results || [];
 }
-function paginaMinhasNotasV310(usuario, notas, mensagem = "", tipo = "sucesso") {
-  const lista = notas.map((n) => `
-    <article class="nota-item-v310">
-      <div class="nota-cabecalho-v310">
-        <strong>${escapeHtml(n.titulo || "Sem título")}</strong>
-        <span class="mini">${escapeHtml(formatarData(n.atualizado_em || n.criado_em))}</span>
+function montarEditorNotaV590(conteudoHtml, identificador) {
+  return `
+    <div class="nota-editor-wrap-v590" data-note-editor-v590="${escapeHtml(identificador)}">
+      <div class="nota-toolbar-v590" role="toolbar" aria-label="Formatação da anotação">
+        <button type="button" class="nota-format-v590" data-note-action-v590="bold" title="Negrito" aria-label="Negrito"><strong>B</strong></button>
+        <span class="nota-toolbar-separador-v590" aria-hidden="true"></span>
+        <button type="button" class="nota-format-v590" data-note-color-v590="yellow" title="Marca-texto amarelo" aria-label="Marca-texto amarelo"><span class="nota-swatch-v590 amarelo"></span></button>
+        <button type="button" class="nota-format-v590" data-note-color-v590="red" title="Marca-texto vermelho" aria-label="Marca-texto vermelho"><span class="nota-swatch-v590 vermelho"></span></button>
+        <button type="button" class="nota-format-v590" data-note-color-v590="green" title="Marca-texto verde" aria-label="Marca-texto verde"><span class="nota-swatch-v590 verde"></span></button>
+        <button type="button" class="nota-format-v590" data-note-color-v590="blue" title="Marca-texto azul" aria-label="Marca-texto azul"><span class="nota-swatch-v590 azul"></span></button>
+        <span class="nota-toolbar-ajuda-v590">Selecione uma palavra ou trecho antes de aplicar</span>
       </div>
-      <form method="POST" action="/minhas-notas/salvar">
-        <input type="hidden" name="id" value="${Number(n.id)}">
-        <input name="titulo" maxlength="80" value="${escapeHtml(n.titulo || "")}" placeholder="Título">
-        <textarea name="conteudo" rows="5" maxlength="4000" placeholder="Escreva aqui...">${escapeHtml(n.conteudo || "")}</textarea>
-        <div class="nota-acoes-v310">
-          <button type="submit">Salvar</button>
-          <span class="mini">${String(n.conteudo || "").length} caracteres</span>
+      <div class="nota-editor-v590" contenteditable="true" role="textbox" aria-multiline="true" data-note-content-v590 data-placeholder="Escreva aqui...">${conteudoHtml || ""}</div>
+      <input type="hidden" name="conteudo" data-note-value-v590>
+      <div class="nota-editor-rodape-v590"><span data-note-count-v590>0 / 4.000 caracteres</span><span data-note-status-v590 aria-live="polite"></span></div>
+    </div>
+  `;
+}
+
+function paginaMinhasNotasV310(usuario, notas, mensagem = "", tipo = "sucesso") {
+  const lista = notas.map((n) => {
+    const conteudoHtml = renderRichNoteValue(n.conteudo, escapeHtml);
+    return `
+      <article class="nota-item-v310">
+        <div class="nota-cabecalho-v310">
+          <strong>${escapeHtml(n.titulo || "Sem título")}</strong>
+          <span class="mini">${escapeHtml(formatarData(n.atualizado_em || n.criado_em))}</span>
         </div>
-      </form>
-      <form method="POST" action="/minhas-notas/excluir" onsubmit="return confirm('Excluir esta anotação?');">
-        <input type="hidden" name="id" value="${Number(n.id)}">
-        <button type="submit" class="botao-sec">Excluir</button>
-      </form>
-    </article>`).join("");
+        <form method="POST" action="/minhas-notas/salvar" class="nota-form-v590">
+          <input type="hidden" name="id" value="${Number(n.id)}">
+          <label>Título<input name="titulo" maxlength="80" value="${escapeHtml(n.titulo || "")}" placeholder="Título"></label>
+          <label>Anotação</label>
+          ${montarEditorNotaV590(conteudoHtml, "nota-" + Number(n.id))}
+          <div class="nota-acoes-v310">
+            <button type="submit">Salvar</button>
+          </div>
+        </form>
+        <form method="POST" action="/minhas-notas/excluir" onsubmit="return confirm('Excluir esta anotação?');">
+          <input type="hidden" name="id" value="${Number(n.id)}">
+          <button type="submit" class="botao-sec">Excluir</button>
+        </form>
+      </article>`;
+  }).join("");
+
   return layout(`
+    <style>
+      .nota-editor-wrap-v590{display:grid;gap:8px;margin:6px 0 10px}
+      .nota-toolbar-v590{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+      .nota-format-v590{display:inline-flex;align-items:center;justify-content:center;min-width:36px;height:34px;padding:0 9px;border:1px solid var(--borda);border-radius:8px;background:var(--superficie-suave);color:var(--texto);cursor:pointer}
+      .nota-format-v590:hover,.nota-format-v590:focus-visible{border-color:var(--turquesa);outline:2px solid transparent}
+      .nota-toolbar-separador-v590{height:22px;border-left:1px solid var(--borda);margin:0 3px}
+      .nota-toolbar-ajuda-v590{font-size:12px;opacity:.7;margin-left:4px}
+      .nota-swatch-v590{display:block;width:19px;height:19px;border:1px solid #0002;border-radius:5px}
+      .nota-swatch-v590.amarelo{background:#FDE68A}
+      .nota-swatch-v590.vermelho{background:#FECACA}
+      .nota-swatch-v590.verde{background:#BBF7D0}
+      .nota-swatch-v590.azul{background:#BFDBFE}
+      .nota-editor-v590{min-height:112px;max-height:420px;overflow:auto;box-sizing:border-box;padding:12px;border:1px solid var(--borda);border-radius:10px;background:var(--branco);color:var(--texto);font:inherit;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;outline:none}
+      .nota-editor-v590:focus{border-color:var(--turquesa);box-shadow:0 0 0 2px color-mix(in srgb,var(--turquesa) 18%,transparent)}
+      .nota-editor-v590:empty:before{content:attr(data-placeholder);opacity:.55;pointer-events:none}
+      .nota-editor-v590 mark[data-cor="yellow"]{background:#FDE68A;color:#422006;border-radius:3px;padding:0 2px}
+      .nota-editor-v590 mark[data-cor="red"]{background:#FECACA;color:#7F1D1D;border-radius:3px;padding:0 2px}
+      .nota-editor-v590 mark[data-cor="green"]{background:#BBF7D0;color:#14532D;border-radius:3px;padding:0 2px}
+      .nota-editor-v590 mark[data-cor="blue"]{background:#BFDBFE;color:#1E3A8A;border-radius:3px;padding:0 2px}
+      .nota-editor-rodape-v590{display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:12px;opacity:.75}
+      .nota-editor-rodape-v590[data-limite="1"]{color:#dc2626;opacity:1}
+      .nota-editor-status-v590{color:#dc2626}
+      .nota-form-v590{display:grid;gap:8px}
+      @media(max-width:600px){.nota-editor-v590{min-height:130px}.nota-toolbar-ajuda-v590{width:100%;margin:2px 0 0}}
+    </style>
     <div class="cabecalho-pagina"><div><h2>📝 Minhas anotações</h2><p class="nota">Bloco de notas particular. Só você vê o que escreve aqui. Nada é apagado automaticamente.</p></div><a class="botao botao-sec" href="/meu-perfil">← Meu perfil</a></div>
     ${mensagem ? `<div class="${tipo === "erro" ? "erro" : "sucesso"}" style="margin-bottom:14px">${escapeHtml(mensagem)}</div>` : ""}
     <section class="card" style="margin-bottom:16px">
       <h3>Nova anotação</h3>
-      <form method="POST" action="/minhas-notas/salvar">
+      <form method="POST" action="/minhas-notas/salvar" class="nota-form-v590">
         <label>Título<input name="titulo" maxlength="80" placeholder="Ex.: Receita do dia, telefone do paciente, tarefa"></label>
-        <label>Anotação<textarea name="conteudo" rows="4" maxlength="4000" placeholder="Escreva aqui..."></textarea></label>
+        <label>Anotação</label>
+        ${montarEditorNotaV590("", "nova")}
         <button type="submit">Adicionar</button>
       </form>
     </section>
     <div class="notas-grade-v310">${lista || `<div class="card"><strong>Nenhuma anotação ainda.</strong><div class="mini">Use a caixa acima para criar a primeira.</div></div>`}</div>
+    <script>
+      (function(){
+        var LIMITE=4000;
+        function tamanho(editor){
+          var texto=typeof editor.innerText==="string"?editor.innerText:editor.textContent||"";
+          texto=texto.replace(/\u00a0/g," ").replace(/\r\n?/g,"\n");
+          if(texto.endsWith("\n")) texto=texto.slice(0,-1);
+          return texto.length;
+        }
+        function faixaAtual(editor,ultima){
+          var selecao=window.getSelection();
+          if(selecao&&selecao.rangeCount&&editor.contains(selecao.anchorNode)&&editor.contains(selecao.focusNode)) return selecao.getRangeAt(0).cloneRange();
+          return ultima;
+        }
+        document.querySelectorAll("[data-note-editor-v590]").forEach(function(bloco){
+          var editor=bloco.querySelector("[data-note-content-v590]");
+          var campo=bloco.querySelector("[data-note-value-v590]");
+          var contador=bloco.querySelector("[data-note-count-v590]");
+          var status=bloco.querySelector("[data-note-status-v590]");
+          var form=bloco.closest("form");
+          var ultimaFaixa=null;
+          function atualizar(){
+            var atual=tamanho(editor);
+            contador.textContent=atual.toLocaleString("pt-BR")+" / 4.000 caracteres";
+            contador.parentElement.dataset.limite=atual>LIMITE?"1":"0";
+            if(atual<=LIMITE) status.textContent="";
+          }
+          editor.addEventListener("mouseup",function(){ultimaFaixa=faixaAtual(editor,ultimaFaixa);});
+          editor.addEventListener("keyup",function(){ultimaFaixa=faixaAtual(editor,ultimaFaixa);atualizar();});
+          editor.addEventListener("input",atualizar);
+          editor.addEventListener("beforeinput",function(event){
+            if(!event.inputType||!event.inputType.startsWith("insert")||typeof event.data!=="string") return;
+            var selecao=window.getSelection();
+            var substituido=selecao?selecao.toString().length:0;
+            if(tamanho(editor)-substituido+event.data.length>LIMITE) event.preventDefault();
+          });
+          editor.addEventListener("paste",function(event){
+            event.preventDefault();
+            var clipboard=event.clipboardData||window.clipboardData;
+            var texto=clipboard?clipboard.getData("text/plain"):"";
+            var selecao=window.getSelection();
+            var substituido=selecao?selecao.toString().length:0;
+            var disponivel=Math.max(0,LIMITE-tamanho(editor)+substituido);
+            texto=texto.slice(0,disponivel);
+            var faixa=faixaAtual(editor,ultimaFaixa);
+            if(!faixa) return;
+            faixa.deleteContents();
+            var no=document.createTextNode(texto);
+            faixa.insertNode(no);
+            faixa.setStartAfter(no);
+            faixa.collapse(true);
+            if(selecao){selecao.removeAllRanges();selecao.addRange(faixa);}
+            ultimaFaixa=faixa.cloneRange();
+            atualizar();
+          });
+          bloco.addEventListener("mousedown",function(event){
+            if(event.target.closest("[data-note-action-v590],[data-note-color-v590]")) event.preventDefault();
+          });
+          bloco.addEventListener("click",function(event){
+            var botao=event.target.closest("[data-note-action-v590],[data-note-color-v590]");
+            if(!botao) return;
+            var faixa=faixaAtual(editor,ultimaFaixa);
+            if(!faixa||faixa.collapsed){
+              status.textContent="Selecione uma palavra ou trecho primeiro.";
+              return;
+            }
+            var tag=botao.dataset.noteActionV590==="bold"?"strong":"mark";
+            var elemento=document.createElement(tag);
+            if(tag==="mark") elemento.setAttribute("data-cor",botao.dataset.noteColorV590||"yellow");
+            var fragmento=faixa.extractContents();
+            elemento.appendChild(fragmento);
+            faixa.insertNode(elemento);
+            var selecao=window.getSelection();
+            var novaFaixa=document.createRange();
+            novaFaixa.selectNodeContents(elemento);
+            if(selecao){selecao.removeAllRanges();selecao.addRange(novaFaixa);}
+            ultimaFaixa=novaFaixa.cloneRange();
+            editor.focus();
+            atualizar();
+          });
+          form.addEventListener("submit",function(event){
+            if(tamanho(editor)>LIMITE){
+              event.preventDefault();
+              status.textContent="A anotação ultrapassa o limite de 4.000 caracteres.";
+              return;
+            }
+            campo.value=editor.innerHTML;
+          });
+          atualizar();
+        });
+      })();
+    </script>
   `, "Minhas anotações", usuario);
 }
+
 function paginaMinhaEvolucaoV320(usuario, inicio, fim, totalAtual, totalAnterior, diasAtivos, setores) {
   const variacao = totalAnterior > 0 ? Math.round((totalAtual - totalAnterior) / totalAnterior * 100) : null;
   const media = diasAtivos ? (totalAtual / diasAtivos).toFixed(1).replace(".", ",") : "0";
@@ -23546,7 +23690,7 @@ async function universidadeEmitirSeElegivelV321(env, cursoId, matriculaId, usuar
     const tentativa = await env.db.prepare(`SELECT aprovou FROM universidade_tentativas_v321 WHERE matricula_id=? ORDER BY id DESC LIMIT 1`).bind(matriculaId).first();
     if (!tentativa || !Number(tentativa.aprovou)) return false;
   }
-  const codigo = "const FLUXO_CACHE='fluxo-lab-v5.8.9';\nself.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\nself.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});\nself.addEventListener('fetch',event=>{const req=event.request;if(req.method!=='GET')return;const url=new URL(req.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(req).catch(()=>new Response('Sem conexão com a internet. Conecte-se para utilizar o Fluxo Lab.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}})));});";
+  const codigo = "const FLUXO_CACHE='fluxo-lab-v5.9.0';\nself.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\nself.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});\nself.addEventListener('fetch',event=>{const req=event.request;if(req.method!=='GET')return;const url=new URL(req.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(req).catch(()=>new Response('Sem conexão com a internet. Conecte-se para utilizar o Fluxo Lab.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}})));});";
   const certificadoInseridoV324 = await env.db.prepare(`INSERT OR IGNORE INTO universidade_certificados_v321 (matricula_id,usuario_id,curso_id,codigo,nome_snapshot,curso_snapshot,carga_horaria_minutos,emitido_em) VALUES (?,?,?,?,?,?,?,?)`).bind(matriculaId, usuario.id, cursoId, codigo, usuario.nome, curso.titulo, curso.carga_horaria_minutos, (/* @__PURE__ */ new Date()).toISOString()).run();
   await env.db.prepare(`UPDATE universidade_matriculas_v321 SET status='CONCLUIDO',concluido_em=COALESCE(concluido_em,?) WHERE id=?`).bind((/* @__PURE__ */ new Date()).toISOString(), matriculaId).run();
   if (Number(certificadoInseridoV324.meta?.changes || 0) > 0) await registrarNotificacaoCentralV324(env, usuario.id, "CERTIFICADO", "Certificado conquistado", `Seu certificado do curso “${curso.titulo}” foi emitido.`, "/universidade/certificados", `CERTIFICADO:${cursoId}:${matriculaId}`);
@@ -25793,27 +25937,31 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!isCoord(usuario)) return textResponse("Somente Administrador/Coordenador pode cancelar uma cidade inteira.", 403);
     const id = Number(match[1]);
     const form = await request.formData();
-    const motivo = String(form.get("motivo") || "").trim();
-    if (motivo.length < 5) return textResponse("Informe o motivo do cancelamento.", 400);
-    const cidade = await env.db.prepare(`SELECT * FROM ciclo_municipios_convencionais WHERE id=? LIMIT 1`).bind(id).first();
-    if (!cidade) return textResponse("Cidade não encontrada.", 404);
-    const entrega = await env.db.prepare(`SELECT id FROM entregas_municipios_convencionais WHERE ciclo_municipio_id=? LIMIT 1`).bind(id).first();
-    if (entrega) return redirect(`/convencional?ciclo=${cidade.ciclo_id}&erro=${encodeURIComponent("Uma cidade já entregue não pode ser cancelada.")}`);
-    await env.db.prepare(`UPDATE ciclo_municipios_convencionais SET cancelado=1,cancelado_por=?,cancelado_em=CURRENT_TIMESTAMP,motivo_cancelamento=? WHERE id=?`).bind(usuario.id, motivo, id).run();
-    await registrarAuditoriaSistemaV31(env, usuario.id, "CONVENCIONAL", "CANCELAR_CIDADE", "CICLO_MUNICIPIO", id, "cancelado", "0", "1", motivo);
-    return redirect(`/convencional?ciclo=${cidade.ciclo_id}&ok=${encodeURIComponent("Cidade cancelada; histórico preservado.")}`);
-  }
-  match = caminho.match(/^\/convencional\/ciclos\/(\d+)\/encerrar$/);
-  if (metodo === "POST" && match) {
+    const motivo = String(form.get("motivo") |if (metodo === "POST" && caminho === "/minhas-notas/salvar") {
     const usuario = await obterUsuarioLogado(request, env);
     if (!usuario) return redirect("/");
-    if (!isCoord(usuario)) return textResponse("Somente Administrador/Coordenador pode encerrar ciclos.", 403);
-    const cicloId = Number(match[1]);
-    const ciclo = await obterCicloConvencional(env, cicloId);
-    if (!ciclo) return textResponse("Ciclo não encontrado.", 404);
     const form = await request.formData();
-    const motivo = String(form.get("motivo") || "").trim();
-    const cidades = await listarCidadesCicloV31(env, cicloId);
+    const id = Number(form.get("id"));
+    const titulo = String(form.get("titulo") || "").trim().slice(0, 80) || "Sem título";
+    const serializada = serializeRichNoteValue(String(form.get("conteudo") || ""));
+    if (serializada.tooLong) return redirect(`/minhas-notas?erro=${encodeURIComponent("A anotação ultrapassa o limite de 4.000 caracteres.")}`);
+    const conteudo = serializada.value;
+    if (serializada.empty && !(Number.isSafeInteger(id) && id > 0)) return redirect(`/minhas-notas?erro=${encodeURIComponent("Escreva alguma coisa antes de salvar.")}`);
+    const agora = new Date().toISOString();
+    try {
+      if (Number.isSafeInteger(id) && id > 0) {
+        const r = await env.db.prepare(`UPDATE usuario_notas_v310 SET titulo = ?, conteudo = ?, atualizado_em = ? WHERE id = ? AND usuario_id = ? AND excluida = 0`).bind(titulo, conteudo, agora, id, usuario.id).run();
+        if (!Number(r?.meta?.changes || 0)) return redirect(`/minhas-notas?erro=${encodeURIComponent("Anotação não encontrada.")}`);
+        return redirect(`/minhas-notas?ok=${encodeURIComponent("Anotação salva.")}`);
+      }
+      await env.db.prepare(`INSERT INTO usuario_notas_v310 (usuario_id, titulo, conteudo, criado_em, atualizado_em, excluida) VALUES (?, ?, ?, ?, ?, 0)`).bind(usuario.id, titulo, conteudo, agora, agora).run();
+      return redirect(`/minhas-notas?ok=${encodeURIComponent("Anotação criada.")}`);
+    } catch (erro) {
+      if (/no such table:\s*usuario_notas_v310/i.test(String(erro?.message || erro))) return redirect(`/minhas-notas?erro=${encodeURIComponent("Rode o comando do console da V3.10.0 primeiro.")}`);
+      throw erro;
+    }
+  }
+  = await listarCidadesCicloV31(env, cicloId);
     const pendentes = cidades.filter((c) => !["ENTREGUE", "CANCELADA"].includes(c.status_v31));
     if (pendentes.length && motivo.length < 5) {
       return redirect(`/convencional?ciclo=${cicloId}&erro=${encodeURIComponent(`Existem ${pendentes.length} cidade(s) pendente(s). Para encerramento excepcional, informe o motivo.`)}`);
@@ -26822,7 +26970,7 @@ const legacy = {
       return new Response(JSON.stringify(manifest), { headers: { "Content-Type": "application/manifest+json; charset=utf-8", "Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff" } });
     }
     if (request.method === "GET" && caminho === "/service-worker.js") {
-      const codigo = "const FLUXO_CACHE='fluxo-lab-v5.8.9';\nself.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\nself.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});\nself.addEventListener('fetch',event=>{const req=event.request;if(req.method!=='GET')return;const url=new URL(req.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(req).catch(()=>new Response('Sem conexão com a internet. Conecte-se para utilizar o Fluxo Lab.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}})));});";
+      const codigo = "const FLUXO_CACHE='fluxo-lab-v5.9.0';\nself.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\nself.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});\nself.addEventListener('fetch',event=>{const req=event.request;if(req.method!=='GET')return;const url=new URL(req.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(req).catch(()=>new Response('Sem conexão com a internet. Conecte-se para utilizar o Fluxo Lab.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}})));});";
       return new Response(codigo, { headers: { "Content-Type": "application/javascript; charset=utf-8", "Cache-Control": "no-cache", "Service-Worker-Allowed": "/", "X-Content-Type-Options": "nosniff" } });
     }
     if (request.method === "GET" && caminho === "/icon-192.png") return respostaIconePwaV581(192);

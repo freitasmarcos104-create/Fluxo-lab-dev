@@ -54,7 +54,7 @@ test('notas formatadas são identificadas e reabertas sem perder formatação', 
   const saved = serializeRichNoteValue('<strong>210 peças</strong><br><mark data-cor="green">Concluído</mark>');
   assert.equal(saved.tooLong, false);
   assert.ok(saved.value.startsWith(RICH_NOTE_PREFIX_V590));
-  assert.equal(countRichNoteCharacters(saved.value), 20);
+  assert.equal(countRichNoteCharacters(saved.value), 19);
   assert.equal(
     renderRichNoteValue(saved.value, escapeHtml),
     '<strong>210 peças</strong><br><mark data-cor="green">Concluído</mark>'
