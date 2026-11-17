@@ -1,4 +1,5 @@
 import { obterUsuarioLogado } from "../core/auth.js";
+import { cabecalhosSegurancaV30, htmlResponse } from "../core/http.js";
 
 const TIPOS_ITEM = ["REAGENTE", "PADRAO", "CONSUMIVEL", "KIT", "VIDRARIA", "EPI"];
 const UNIDADES = ["mL", "g", "un"];
@@ -24,19 +25,19 @@ export function sinalMovimentoAlmox(tipo) {
 function respostaJson(data, status = 200) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" }
+    headers: cabecalhosSegurancaV30("application/json; charset=UTF-8")
   });
 }
 
 function respostaHtml(html, status = 200) {
-  return new Response(html, {
-    status,
-    headers: { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff", "Referrer-Policy": "same-origin" }
-  });
+  return htmlResponse(html, status);
 }
 
 function redirecionar(destino) {
-  return new Response(null, { status: 303, headers: { Location: destino, "Cache-Control": "no-store" } });
+  return new Response(null, {
+    status: 303,
+    headers: { ...cabecalhosSegurancaV30("text/plain; charset=UTF-8"), Location: destino }
+  });
 }
 
 function numeroPositivo(value, label = "Quantidade") {
