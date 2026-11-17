@@ -11,10 +11,10 @@ Adicionar ao Worker oficial o setor Almoxarifado, compartilhado pelo site, Windo
 - Views almoxarifado_saldos_lotes e almoxarifado_saldos_itens calculam o saldo a partir dos movimentos.
 
 ## Regras implementadas
-- O saldo não é editável e não é armazenado como número independente.
+- O saldo não é editável e não é armazenado como número independente. O painel separa saldo físico total de saldo disponível; lotes vencidos, em quarentena ou bloqueados não contam como disponíveis.
 - Triggers D1 bloqueiam saldo negativo, saídas de lotes vencidos/quarentena/bloqueados e atendimento acima do pedido.
-- Lotes disponíveis são sugeridos por FEFO; lotes sem validade ficam depois dos que têm vencimento.
-- Ajustes exigem motivo; movimentos não podem ser alterados ou apagados.
+- Lotes disponíveis são sugeridos por FEFO; lotes sem validade ficam depois dos que têm vencimento. Reagentes, padrões e kits exigem rastreabilidade de lote e validade; consumíveis genéricos podem usar lote interno.
+- Ajustes, perdas e vencimentos exigem motivo; movimentos não podem ser alterados ou apagados. Transferências registram origem e destino e movem o lote inteiro, pois cada lote mantém uma única localização.
 - Material sem controle de lote recebe um lote interno de recebimento para manter a origem da quantidade sem exigir rastreio externo.
 - Funcionários autenticados podem abrir requisições. Cadastro, recebimento, atendimento, transferência, inventário e controle dos lotes ficam inicialmente restritos a ADMINISTRADOR e COORDENADOR.
 - Equipamentos patrimoniais não entram no estoque.
