@@ -41,6 +41,18 @@ export function deveBloquearRotaAlmoxarife(isAlmoxarife, pathname, method) {
     "/icon-192.png",
     "/icon-512.png"
   ].includes(path)) return false;
+
+  // O Almoxarife conserva o espaço do colaborador e suas ferramentas gerais,
+  // mas não recebe rotas de produção, relatórios ou gestão operacional.
+  const rotasColaborador = [
+    "/meu-espaco", "/comunicacao", "/agenda-tarefas", "/notificacoes",
+    "/emblemas", "/universidade", "/meu-perfil", "/minhas-notas", "/mensagens"
+  ];
+  if (rotasColaborador.includes(path)) return false;
+  if (["/comunicacao/", "/agenda-tarefas/", "/notificacoes/", "/emblemas/",
+       "/universidade/", "/meu-perfil/", "/minhas-notas/", "/mensagens/",
+       "/foto-usuario/", "/avatar-usuario/"].some(prefix => path.startsWith(prefix))) return false;
+  if (path.startsWith("/uploads/avatar/") || path.startsWith("/uploads/fotos/")) return false;
   return true;
 }
 
@@ -297,9 +309,12 @@ async function dadosLotes(env, itemId = 0) {
     ...params);
 }
 
-async function dadosRequisicoes(env) {
-  return todos(env.db,
-    "SELECT r.id AS requisicao_id,r.solicitante_id,r.setor,r.observacao,r.criado_em,u.nome AS solicitante,ri.id AS requisicao_item_id,ri.item_id,ri.quantidade_solicitada,i.codigo,i.nome AS item_nome,i.unidade,COALESCE((SELECT SUM(m.quantidade) FROM almoxarifado_movimentos m WHERE m.requisicao_item_id=ri.id AND m.tipo='SAIDA'),0) AS quantidade_atendida,CASE WHEN r.status='CANCELADA' THEN 'CANCELADA' WHEN COALESCE((SELECT SUM(m.quantidade) FROM almoxarifado_movimentos m WHERE m.requisicao_item_id=ri.id AND m.tipo='SAIDA'),0)>=ri.quantidade_solicitada THEN 'ATENDIDA' WHEN COALESCE((SELECT SUM(m.quantidade) FROM almoxarifado_movimentos m WHERE m.requisicao_item_id=ri.id AND m.tipo='SAIDA'),0)>0 THEN 'PARCIAL' ELSE 'ABERTA' END AS status FROM almoxarifado_requisicoes r JOIN almoxarifado_requisicao_itens ri ON ri.requisicao_id=r.id JOIN almoxarifado_itens i ON i.id=ri.item_id LEFT JOIN usuarios u ON u.id=r.solicitante_id ORDER BY r.id DESC,ri.id ASC LIMIT 250");
+async function dadosRequisicoes(env, solicitante = null) {
+  const filtro = solicitante ? " WHERE r.solicitante_id=?" : "";
+  const sql = "SELECT r.id AS requisicao_id,r.solicitante_id,r.setor,r.observacao,r.criado_em,u.nome AS solicitante,ri.id AS requisicao_item_id,ri.item_id,ri.quantidade_solicitada,i.codigo,i.nome AS item_nome,i.unidade,COALESCE((SELECT SUM(m.quantidade) FROM almoxarifado_movimentos m WHERE m.requisicao_item_id=ri.id AND m.tipo='SAIDA'),0) AS quantidade_atendida,CASE WHEN r.status='CANCELADA' THEN 'CANCELADA' WHEN COALESCE((SELECT SUM(m.quantidade) FROM almoxarifado_movimentos m WHERE m.requisicao_item_id=ri.id AND m.tipo='SAIDA'),0)>=ri.quantidade_solicitada THEN 'ATENDIDA' WHEN COALESCE((SELECT SUM(m.quantidade) FROM almoxarifado_movimentos m WHERE m.requisicao_item_id=ri.id AND m.tipo='SAIDA'),0)>0 THEN 'PARCIAL' ELSE 'ABERTA' END AS status FROM almoxarifado_requisicoes r JOIN almoxarifado_requisicao_itens ri ON ri.requisicao_id=r.id JOIN almoxarifado_itens i ON i.id=ri.item_id LEFT JOIN usuarios u ON u.id=r.solicitante_id" + filtro + " ORDER BY r.id DESC,ri.id ASC LIMIT 250";
+  return solicitante
+    ? todos(env.db, sql, Number(solicitante.id))
+    : todos(env.db, sql);
 }
 
 async function dadosMovimentos(env) {
@@ -342,7 +357,7 @@ function selItens(itens) {
   ).join("");
 }
 
-function renderTabelaItens(itens) {
+function renderTabelaItens(itens, gerente = true) {
   if (!itens.length) return '<p class="vazio">Nenhum item cadastrado.</p>';
   return '<div class="tabela-wrap"><table><thead><tr><th>Código</th><th>Item</th><th>Tipo</th><th>Disponível</th><th>Total físico</th><th>Mínimo</th><th>Controle</th><th>Situação</th></tr></thead><tbody>' +
     itens.map((item) => {
@@ -350,8 +365,11 @@ function renderTabelaItens(itens) {
       const total = Number(item.saldo_total || 0);
       const minimo = Number(item.quantidade_minima || 0);
       const status = saldo <= 0 ? "SEM ESTOQUE DISPONÍVEL" : saldo < minimo ? "ABAIXO DO MÍNIMO" : "NORMAL";
-      return '<tr><td>' + escaparHtmlAlmox(item.codigo) + '</td><td><a href="/almoxarifado?view=item&id=' + item.id + '">' + escaparHtmlAlmox(item.nome) +
-        '</a></td><td>' + escaparHtmlAlmox(item.tipo) + '</td><td class="numero">' + saldo + " " + escaparHtmlAlmox(item.unidade) +
+      const nome = gerente
+        ? '<a href="/almoxarifado?view=item&id=' + item.id + '">' + escaparHtmlAlmox(item.nome) + '</a>'
+        : '<strong>' + escaparHtmlAlmox(item.nome) + '</strong>';
+      return '<tr><td>' + escaparHtmlAlmox(item.codigo) + '</td><td>' + nome +
+        '</td><td>' + escaparHtmlAlmox(item.tipo) + '</td><td class="numero">' + saldo + " " + escaparHtmlAlmox(item.unidade) +
         '</td><td class="numero">' + total + " " + escaparHtmlAlmox(item.unidade) + '</td><td class="numero">' + minimo +
         '</td><td>' + (item.controla_lote ? "Lote e validade" : "Lote interno") +
         '</td><td><span class="status ' + classeStatus(status) + '">' + status + "</span></td></tr>";
@@ -465,7 +483,9 @@ function formularioInventario(lotes) {
 }
 
 function layoutAlmox(user, view, content, gerente, notice = "", almoxarifeExclusivo = false) {
-  const links = [["dashboard","Painel"],["itens","Itens"],["entrada","Entrada"],["requisicoes","Requisições"],["lotes","Lotes"],["movimentos","Movimentos"],["inventario","Inventário"]];
+  const links = gerente
+    ? [["dashboard","Painel"],["itens","Itens"],["entrada","Entrada"],["requisicoes","Requisições"],["lotes","Lotes"],["movimentos","Movimentos"],["inventario","Inventário"]]
+    : [["itens","Consultar materiais"],["requisicoes","Requisições"]];
   const nav = links.map(([key,label]) => '<a class="' + (view === key ? "ativo" : "") + '" href="/almoxarifado?view=' + key + '">' + label + "</a>").join("");
   const css = [
     ":root{color-scheme:light;--ink:#17233b;--muted:#62708a;--line:#e3e9f2;--paper:#f4f7fb;--blue:#2872c8;--blue2:#e8f1ff;--green:#157347;--yellow:#946200;--red:#b42318}",
@@ -498,11 +518,12 @@ function layoutAlmox(user, view, content, gerente, notice = "", almoxarifeExclus
 }
 
 async function renderView(env, user, url) {
-  const view = String(url.searchParams.get("view") || "dashboard");
   const almoxarifeExclusivo = await ehFuncionarioAlmoxarifado(env,user);
   const gerente = gerenteAlmox(user) || almoxarifeExclusivo;
+  let view = String(url.searchParams.get("view") || (gerente ? "dashboard" : "itens"));
+  if (!gerente && !["itens","requisicoes"].includes(view)) view = "itens";
   const itens = await dadosItens(env,url.searchParams.get("q"));
-  const lotes = await dadosLotes(env);
+  const lotes = gerente ? await dadosLotes(env) : [];
   let content = "";
   let requisicoes = [];
   const notice = String(url.searchParams.get("ok") || url.searchParams.get("erro") || "");
@@ -518,20 +539,20 @@ async function renderView(env, user, url) {
       painel.vencendo_30 + '</strong></div><div><small>Até 60 dias</small><strong>' + painel.vencendo_60 +
       '</strong></div><div><small>Até 90 dias</small><strong>' + painel.vencendo_90 + '</strong></div></div>' +
       (vencendo.length ? renderTabelaLotes(vencendo,false) : '<p class="vazio">Nenhum lote disponível vence nos próximos 30 dias.</p>') +
-      '</section><section class="panel"><h2>Itens abaixo do mínimo</h2>' + renderTabelaItens(abaixo) + '</section>';
-    requisicoes = (await dadosRequisicoes(env)).filter((r) => ["ABERTA","PARCIAL"].includes(r.status)).slice(0,8);
+      '</section><section class="panel"><h2>Itens abaixo do mínimo</h2>' + renderTabelaItens(abaixo,gerente) + '</section>';
+    requisicoes = (await dadosRequisicoes(env, gerente ? null : user)).filter((r) => ["ABERTA","PARCIAL"].includes(r.status)).slice(0,8);
     content += '<section class="panel"><h2>Requisições pendentes</h2>' + renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
   } else if (view === "itens") {
     const busca = String(url.searchParams.get("q") || "");
     content = (gerente ? '<section class="panel"><h2>Novo item</h2>' + formularioItem() + '</section>' : "") +
       '<section class="panel"><h2>Catálogo de materiais</h2><form class="linha-form" method="GET" action="/almoxarifado">' +
       '<input type="hidden" name="view" value="itens"><input name="q" value="' + escaparHtmlAlmox(busca) +
-      '" placeholder="Buscar por código ou nome"><button>Buscar</button></form><br>' + renderTabelaItens(itens) + '</section>';
+      '" placeholder="Buscar por código ou nome"><button>Buscar</button></form><br>' + renderTabelaItens(itens,gerente) + '</section>';
   } else if (view === "entrada") {
     content = gerente ? '<section class="panel"><h2>Registrar recebimento</h2><p class="muted">O material conferido entra como disponível. Material pendente de checagem entra em quarentena.</p>' +
       formularioEntrada(itens) + '</section>' : '<section class="panel"><p>Entrada de materiais restrita à administração e coordenação.</p></section>';
   } else if (view === "requisicoes") {
-    requisicoes = await dadosRequisicoes(env);
+    requisicoes = await dadosRequisicoes(env, gerente ? null : user);
     content = '<section class="panel"><h2>Solicitar material</h2>' + formularioRequisicao(itens,user) + '</section>' +
       '<section class="panel"><h2>Pedidos registrados</h2>' + renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
   } else if (view === "lotes") {
@@ -604,11 +625,20 @@ async function processarFormulario(request, env, user) {
 async function handleApi(request, env, url, user) {
   const path = url.pathname;
   const gerente = await podeGerenciarAlmox(env,user);
-  if (request.method === "GET" && path === "/almoxarifado/api/painel") return respostaJson(await dadosPainel(env));
+  if (request.method === "GET" && path === "/almoxarifado/api/painel") {
+    if (!gerente) return respostaJson({erro:"Painel restrito à equipe do Almoxarifado."},403);
+    return respostaJson(await dadosPainel(env));
+  }
   if (request.method === "GET" && path === "/almoxarifado/api/itens") return respostaJson(await dadosItens(env,url.searchParams.get("q")));
-  if (request.method === "GET" && path === "/almoxarifado/api/lotes") return respostaJson(await dadosLotes(env,url.searchParams.get("item_id")));
-  if (request.method === "GET" && path === "/almoxarifado/api/requisicoes") return respostaJson(await dadosRequisicoes(env));
-  if (request.method === "GET" && path === "/almoxarifado/api/movimentos") return respostaJson(await dadosMovimentos(env));
+  if (request.method === "GET" && path === "/almoxarifado/api/lotes") {
+    if (!gerente) return respostaJson({erro:"Consulta de lotes restrita à equipe do Almoxarifado."},403);
+    return respostaJson(await dadosLotes(env,url.searchParams.get("item_id")));
+  }
+  if (request.method === "GET" && path === "/almoxarifado/api/requisicoes") return respostaJson(await dadosRequisicoes(env,gerente ? null : user));
+  if (request.method === "GET" && path === "/almoxarifado/api/movimentos") {
+    if (!gerente) return respostaJson({erro:"Histórico restrito à equipe do Almoxarifado."},403);
+    return respostaJson(await dadosMovimentos(env));
+  }
   if (request.method === "POST" && path === "/almoxarifado/api/itens") {
     if (!gerente) return respostaJson({erro:"Acesso restrito aos responsáveis do Almoxarifado."},403);
     await criarItem(env,user,await lerJson(request)); return respostaJson({ok:true},201);
@@ -633,6 +663,57 @@ async function handleApi(request, env, url, user) {
     await registrarMovimentoEspecial(env,user,await lerJson(request)); return respostaJson({ok:true},201);
   }
   return respostaJson({erro:"Rota do Almoxarifado não encontrada."},404);
+}
+
+
+async function podeAcessarChatAlmoxarifado(env,user) {
+  return gerenteAlmox(user) || ehFuncionarioAlmoxarifado(env,user);
+}
+
+async function dadosChatAlmoxarifado(env) {
+  const mensagens = await todos(env.db, `
+    SELECT c.id,c.usuario_id,c.mensagem,c.criado_em,u.nome
+    FROM almoxarifado_chat_mensagens c
+    INNER JOIN usuarios u ON u.id=c.usuario_id
+    ORDER BY c.id DESC LIMIT 100
+  `);
+  return mensagens.reverse();
+}
+
+function renderChatAlmoxarifado(mensagens,user,notice="") {
+  const linhas = mensagens.map((m) => {
+    const propria = Number(m.usuario_id) === Number(user.id);
+    return '<article class="almox-chat-msg ' + (propria ? 'almox-chat-propria' : '') + '">' +
+      '<div class="almox-chat-meta"><strong>' + escaparHtmlAlmox(m.nome || "Usuário") + '</strong><span>' +
+      escaparHtmlAlmox(m.criado_em) + '</span></div><p>' + escaparHtmlAlmox(m.mensagem) + '</p></article>';
+  }).join("");
+  const corpo = linhas || '<p class="vazio">Ainda não há mensagens. Comece a conversa com a equipe.</p>';
+  return respostaHtml(layoutAlmox(user,"chat",
+    '<section class="panel"><div class="cabecalho-pagina"><div><h2>Chat da equipe</h2><p class="muted">Canal reservado ao Almoxarifado e à administração.</p></div></div>' +
+    '<div class="almox-chat-lista">' + corpo + '</div>' +
+    '<form method="POST" action="/almoxarifado/chat" class="almox-chat-form">' +
+    '<label for="almox-chat-mensagem">Mensagem</label><textarea id="almox-chat-mensagem" name="mensagem" rows="2" minlength="1" maxlength="1500" required placeholder="Escreva para a equipe..."></textarea>' +
+    '<div class="acoes"><button type="submit">Enviar mensagem</button></div></form></section>',true,notice,true));
+}
+
+async function processarChatAlmoxarifado(request,env,user) {
+  if (!(await podeAcessarChatAlmoxarifado(env,user))) {
+    return respostaJson({erro:"Acesso restrito à equipe do Almoxarifado."},403);
+  }
+  if (request.method === "GET") {
+    const notice=String(new URL(request.url).searchParams.get("ok") || new URL(request.url).searchParams.get("erro") || "");
+    return renderChatAlmoxarifado(await dadosChatAlmoxarifado(env),user,notice);
+  }
+  if (request.method !== "POST") return respostaJson({erro:"Método não permitido."},405);
+  const form=await request.formData();
+  const mensagem=String(form.get("mensagem") || "").trim();
+  if (!mensagem || mensagem.length>1500) {
+    return redirecionar("/almoxarifado/chat?erro="+encodeURIComponent("A mensagem deve ter entre 1 e 1.500 caracteres."));
+  }
+  await executar(env.db,
+    "INSERT INTO almoxarifado_chat_mensagens (usuario_id,mensagem) VALUES (?,?)",
+    Number(user.id),mensagem);
+  return redirecionar("/almoxarifado/chat?ok="+encodeURIComponent("Mensagem enviada."));
 }
 
 async function listarEquipeAlmoxarifado(env) {
@@ -776,6 +857,9 @@ export async function handleAlmoxarifado(request, env, url) {
     if (url.pathname.startsWith("/almoxarifado/equipe/")) {
       return redirecionar(await processarEquipeAlmoxarifado(request,env,user,url.pathname));
     }
+    if (url.pathname === "/almoxarifado/chat") {
+      return await processarChatAlmoxarifado(request,env,user);
+    }
     if (isApi) {
       if (request.method !== "GET" && request.method !== "POST") return respostaJson({erro:"Método não permitido."},405);
       return await handleApi(request,env,url,user);
@@ -797,15 +881,154 @@ export function atualizarIdentificacaoVersaoAlmoxarifado(conteudo, pathname) {
   const texto = String(conteudo ?? "");
   if (pathname === "/service-worker.js") {
     return texto
-      .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.11.0")
-      .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.11.0");
+      .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.12.0")
+      .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.12.0")
+      .replaceAll("fluxo-lab-v5.11.0", "fluxo-lab-v5.12.0");
   }
   return texto
-    .replaceAll("V5.9.0", "V5.11.0")
-    .replaceAll("V5.10.0", "V5.11.0");
+    .replaceAll("V5.9.0", "V5.12.0")
+    .replaceAll("V5.10.0", "V5.12.0")
+    .replaceAll("V5.11.0", "V5.12.0");
 }
 
-export async function injetarLinkAlmoxarifado(response, request) {
+
+export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
+  if (!respostaAlmox || !responseShell || respostaAlmox.status !== 200 || responseShell.status !== 200) {
+    return new Response("Área do Almoxarifado indisponível no momento.",{status:500,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}});
+  }
+  const [htmlAlmox,htmlShell]=await Promise.all([respostaAlmox.text(),responseShell.text()]);
+  const almoxStart=htmlAlmox.indexOf('<main class="wrap">');
+  const almoxOpenEnd=almoxStart>=0 ? htmlAlmox.indexOf(">",almoxStart)+1 : -1;
+  const almoxClose=almoxOpenEnd>0 ? htmlAlmox.indexOf("</main>",almoxOpenEnd) : -1;
+  if (almoxStart<0 || almoxOpenEnd<=0 || almoxClose<0) return new Response("Não foi possível integrar a área do Almoxarifado ao Fluxo Lab.",{status:500,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}});
+  const shellStart=htmlShell.indexOf('<main class="container">');
+  const shellOpenEnd=shellStart>=0 ? htmlShell.indexOf(">",shellStart)+1 : -1;
+  const shellClose=shellOpenEnd>0 ? htmlShell.indexOf("</main>",shellOpenEnd) : -1;
+  if (shellStart<0 || shellOpenEnd<=0 || shellClose<0) return respostaHtml('<section class="card"><h2>Almoxarifado indisponível</h2><p>Não foi possível montar a área dentro do Fluxo Lab.</p></section>',500);
+  const estilo=`
+    <style id="estilo-almoxarifado-integrado">
+      .sidebar-nav a[href="/almoxarifado"]{background:rgba(16,139,137,.24)!important;border-color:rgba(32,184,181,.42)!important;color:#fff!important}
+      .almox-integrado{color:var(--texto);min-width:0}
+      .almox-integrado .intro{display:flex;align-items:flex-end;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:0 0 18px}
+      .almox-integrado .intro h1{margin:0 0 4px;color:var(--texto);font-size:26px}
+      .almox-integrado .intro p,.almox-integrado .muted,.almox-integrado .vazio{color:var(--texto-suave)}
+      .almox-integrado .intro .status{display:inline-flex;align-items:center}
+      .almox-integrado nav[aria-label="Navegação do almoxarifado"]{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 20px;padding:7px;background:var(--branco);border:1px solid var(--borda);border-radius:13px}
+      .almox-integrado nav[aria-label="Navegação do almoxarifado"] a{display:inline-flex;align-items:center;padding:9px 13px;border-radius:9px;text-decoration:none;color:var(--texto);font-weight:700}
+      .almox-integrado nav[aria-label="Navegação do almoxarifado"] a.ativo{background:var(--turquesa);color:#fff}
+      .almox-integrado .panel,.almox-integrado .card{background:var(--branco);color:var(--texto);border:1px solid var(--borda);border-radius:14px;box-shadow:var(--sombra)}
+      .almox-integrado .panel{padding:17px;margin-bottom:16px}
+      .almox-integrado .panel h2,.almox-integrado .panel h3{color:var(--texto)}
+      .almox-integrado .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:0 0 16px}
+      .almox-integrado .grid .card{padding:16px}
+      .almox-integrado .form-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:12px}
+      .almox-integrado .form-grid label{display:flex;flex-direction:column;gap:5px;color:var(--texto);font-weight:650}
+      .almox-integrado input,.almox-integrado select,.almox-integrado textarea{min-width:0;max-width:100%;background:var(--superficie-suave);color:var(--texto);border:1px solid var(--borda);border-radius:9px;padding:10px;font:inherit}
+      .almox-integrado button{background:var(--turquesa);color:#fff;border:0;border-radius:9px;padding:10px 15px;font-weight:750;cursor:pointer}
+      .almox-integrado button.secundario{background:var(--superficie-suave);color:var(--texto);border:1px solid var(--borda)}
+      .almox-integrado .notice{background:rgba(7,135,79,.12);color:var(--texto);border:1px solid rgba(7,135,79,.35);border-radius:10px;padding:12px;margin-bottom:15px}
+      .almox-integrado .tabela-wrap{overflow:auto;background:var(--branco);border:1px solid var(--borda);border-radius:12px}
+      .almox-integrado table{width:100%;border-collapse:collapse;min-width:680px;background:transparent}
+      .almox-integrado th,.almox-integrado td{padding:10px 11px;text-align:left;border-bottom:1px solid var(--borda);color:var(--texto)}
+      .almox-integrado th{background:var(--superficie-suave);color:var(--texto-suave);font-size:10px}
+      .almox-integrado td a{color:var(--accent-link);font-weight:750}
+      .almox-integrado .detail{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+      .almox-integrado .detail div{background:var(--superficie-suave);color:var(--texto);padding:12px;border-radius:9px}
+      .almox-integrado .detail small{color:var(--texto-suave)}
+      .almox-integrado .status{border-radius:100px;padding:4px 8px;font-size:11px;font-weight:800}
+      .almox-integrado .status.ok{background:rgba(7,135,79,.16);color:#35c98a}
+      .almox-integrado .status.alerta{background:rgba(180,106,10,.16);color:#e2b45b}
+      .almox-integrado .status.bloqueio{background:rgba(199,58,50,.16);color:#ed8e87}
+      .almox-integrado .lista-requisicoes{display:grid;gap:10px}
+      .almox-integrado .requisicao{background:var(--superficie-suave);border:1px solid var(--borda);border-radius:11px;padding:14px}
+      .almox-integrado .requisicao p{color:var(--texto-suave)}
+      .almox-integrado .acoes{display:flex;justify-content:flex-end;gap:10px}
+      .almox-integrado .almox-chat-lista{display:grid;gap:10px;max-height:55vh;overflow:auto;padding:6px 0 15px}
+      .almox-integrado .almox-chat-msg{max-width:min(760px,88%);padding:10px 13px;border-radius:12px;background:var(--superficie-suave);border:1px solid var(--borda)}
+      .almox-integrado .almox-chat-propria{margin-left:auto;background:rgba(16,139,137,.16);border-color:rgba(32,184,181,.3)}
+      .almox-integrado .almox-chat-meta{display:flex;gap:12px;justify-content:space-between;flex-wrap:wrap;font-size:11px;color:var(--texto-suave)}
+      .almox-integrado .almox-chat-msg p{margin:6px 0 0;white-space:pre-wrap;overflow-wrap:anywhere}
+      .almox-integrado .almox-chat-form{display:grid;gap:9px;border-top:1px solid var(--borda);padding-top:14px}
+      @media(max-width:700px){.almox-integrado .intro h1{font-size:22px}.almox-integrado .form-grid{grid-template-columns:1fr}.almox-integrado .almox-chat-msg{max-width:96%}}
+    </style>`;
+  const conteudo='<div class="almox-integrado">'+htmlAlmox.slice(almoxOpenEnd,almoxClose)+'</div>';
+  let updated=htmlShell.slice(0,shellOpenEnd)+estilo+conteudo+htmlShell.slice(shellClose);
+  const titleStart=updated.indexOf("<title>");
+  const titleEnd=titleStart>=0 ? updated.indexOf("</title>",titleStart) : -1;
+  if(titleStart>=0 && titleEnd>titleStart) updated=updated.slice(0,titleStart)+"<title>Almoxarifado · Fluxo Lab</title>"+updated.slice(titleEnd+8);
+  const topbarStart=updated.indexOf('<div class="topbar-titulo">');
+  const strongStart=topbarStart>=0 ? updated.indexOf("<strong>",topbarStart) : -1;
+  const strongEnd=strongStart>=0 ? updated.indexOf("</strong>",strongStart) : -1;
+  if(strongStart>=0 && strongEnd>strongStart) updated=updated.slice(0,strongStart+8)+"Almoxarifado"+updated.slice(strongEnd);
+  const headers=new Headers(responseShell.headers);
+  headers.delete("content-length");headers.delete("content-encoding");
+  headers.set("cache-control","private, no-store");
+  return new Response(updated,{status:200,headers});
+}
+
+
+export function renderEspacoColaboradorAlmoxarife(user) {
+  const nome = String(user?.nome || "Colaborador").trim().split(/\s+/)[0];
+  const saudacao = (() => {
+    const hora = Number(new Intl.DateTimeFormat("pt-BR", {
+      timeZone:"America/Sao_Paulo",hour:"2-digit",hourCycle:"h23"
+    }).format(new Date()));
+    return hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
+  })();
+  const cards = [
+    ["💬","Chat da equipe","Converse com os demais integrantes do Almoxarifado.","/almoxarifado/chat"],
+    ["✉","Comunicação e solicitações","Acesse os canais de comunicação e os pedidos internos.","/comunicacao"],
+    ["📅","Agenda e tarefas","Consulte seus compromissos e tarefas.","/agenda-tarefas"],
+    ["🔔","Notificações","Acompanhe seus avisos e notificações.","/notificacoes"],
+    ["✎","Minhas anotações","Guarde lembretes e informações particulares.","/minhas-notas"],
+    ["◉","Meu perfil","Atualize seus dados e preferências de conta.","/meu-perfil"],
+    ["🎓","Universidade Fluxo Lab","Acesse os cursos e materiais de aprendizagem.","/universidade"],
+    ["🏆","Minha coleção de emblemas","Consulte suas conquistas e reconhecimentos.","/emblemas"]
+  ];
+  return '<style id="espaco-colaborador-almoxarife">' +
+    '.espaco-almox-hero{padding:22px;border:1px solid var(--borda);border-radius:16px;background:linear-gradient(120deg,rgba(16,139,137,.20),var(--branco));margin-bottom:18px}' +
+    '.espaco-almox-hero h2{margin:5px 0 7px;font-size:clamp(24px,3vw,32px)}.espaco-almox-hero p{margin:0;color:var(--texto-suave)}' +
+    '.espaco-almox-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}' +
+    '.espaco-almox-card{display:flex;gap:12px;align-items:flex-start;padding:16px;border:1px solid var(--borda);border-radius:13px;background:var(--branco);text-decoration:none;color:var(--texto);min-height:100px;box-shadow:var(--sombra)}' +
+    '.espaco-almox-card:hover{border-color:var(--turquesa);transform:translateY(-1px)}.espaco-almox-icone{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:11px;background:var(--superficie-suave);font-size:21px}' +
+    '.espaco-almox-card strong{display:block;margin:0 0 5px}.espaco-almox-card small{color:var(--texto-suave);line-height:1.4}' +
+    '</style>' +
+    '<section class="espaco-almox-hero"><div class="mini">ESPAÇO DO COLABORADOR</div><h2>' +
+    escaparHtmlAlmox(saudacao + ", " + nome + "!") +
+    '</h2><p>Este é seu espaço pessoal no Fluxo Lab, com acesso às ferramentas de colaboração, comunicação e aprendizagem.</p></section>' +
+    '<h3 style="margin:18px 0 10px">Minhas ferramentas</h3><div class="espaco-almox-grid">' +
+    cards.map(([icone,titulo,descricao,href]) =>
+      '<a class="espaco-almox-card" href="' + href + '"><span class="espaco-almox-icone">' + icone +
+      '</span><span><strong>' + escaparHtmlAlmox(titulo) + '</strong><small>' +
+      escaparHtmlAlmox(descricao) + '</small></span></a>'
+    ).join("") + '</div>';
+}
+
+export async function adaptarMeuEspacoAlmoxarife(response,request,env) {
+  const url = new URL(request.url);
+  if (!response || response.status !== 200 || request.method !== "GET" || url.pathname !== "/meu-espaco") return response;
+  const user = await obterUsuarioLogado(request,env);
+  if (!(await ehFuncionarioAlmoxarifado(env,user))) return response;
+  const contentType = response.headers.get("content-type") || "";
+  if (!contentType.includes("text/html")) return response;
+  const original = await response.text();
+  const mainOpen = original.indexOf('<main class="container">');
+  const mainStart = mainOpen >= 0 ? original.indexOf(">",mainOpen) + 1 : -1;
+  const mainEnd = mainStart > 0 ? original.indexOf("</main>",mainStart) : -1;
+  if (mainOpen < 0 || mainStart <= 0 || mainEnd < 0) {
+    return new Response("Não foi possível abrir o Espaço do Colaborador.", {
+      status:500,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}
+    });
+  }
+  const updated = original.slice(0,mainStart) + renderEspacoColaboradorAlmoxarife(user) + original.slice(mainEnd);
+  const headers = new Headers(response.headers);
+  headers.delete("content-length");
+  headers.delete("content-encoding");
+  headers.set("cache-control","private, no-store");
+  return new Response(updated,{status:response.status,statusText:response.statusText,headers});
+}
+
+export async function injetarLinkAlmoxarifado(response, request, env) {
   if (!response || response.status !== 200 || request.method === "HEAD") return response;
   const url = new URL(request.url);
   const contentType = response.headers.get("content-type") || "";
@@ -815,9 +1038,52 @@ export async function injetarLinkAlmoxarifado(response, request) {
 
   const original = await response.text();
   let updated = atualizarIdentificacaoVersaoAlmoxarifado(original, url.pathname);
-  if (ehHtml && updated.includes('class="sidebar-nav"') && !updated.includes('href="/almoxarifado"')) {
-    const link = '<a href="/almoxarifado"><span class="nav-icone">▤</span><span>Almoxarifado</span></a>';
-    updated = updated.replace(/(<nav\b[^>]*class="sidebar-nav"[^>]*>[\s\S]*?)(<\/nav>)/i, "$1" + link + "$2");
+  if (ehHtml && updated.includes('class="sidebar-nav"')) {
+    const user = env?.db ? await obterUsuarioLogado(request,env) : null;
+    const almoxarife = await ehFuncionarioAlmoxarifado(env,user);
+    const gestor = gerenteAlmox(user);
+    const podeVerLink = !user || String(user.perfil || "").toUpperCase() !== "CADASTRO";
+    const link = '<a href="/almoxarifado" class="almoxarifado-nav-link"><span class="nav-icone">▤</span><span>Almoxarifado</span></a>';
+    const chat = '<a href="/almoxarifado/chat"><span class="nav-icone">💬</span><span>Chat da equipe</span></a>';
+
+    if (almoxarife) {
+      let bloco = 0;
+      updated = updated.replace(/(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/g,(whole,open,inner,close) => {
+        bloco++;
+        if (bloco === 1) return open + link + close;
+        if (bloco === 2) {
+          const colaborador = [
+            '<a href="/meu-espaco" class="nav-destaque-v319"><span class="nav-icone">✦</span><span>Meu Espaço</span></a>',
+            chat,
+            '<a href="/comunicacao"><span class="nav-icone">✉</span><span>Comunicação e solicitações</span></a>',
+            '<a href="/agenda-tarefas"><span class="nav-icone">📅</span><span>Agenda e tarefas</span></a>',
+            '<a href="/notificacoes"><span class="nav-icone">🔔</span><span>Notificações</span></a>',
+            '<a href="/emblemas"><span class="nav-icone">🏆</span><span>Minha coleção de emblemas</span></a>',
+            '<a href="/universidade"><span class="nav-icone">🎓</span><span>Universidade Fluxo Lab</span></a>',
+            '<a href="/meu-perfil"><span class="nav-icone">◉</span><span>Meu perfil</span></a>',
+            '<a href="/minhas-notas"><span class="nav-icone">✎</span><span>Minhas anotações</span></a>'
+          ].join("");
+          return open + colaborador + close;
+        }
+        return whole;
+      });
+      updated = updated.replace(/<a\b[^>]*href="\/digital\/chat-equipe"[^>]*>[\s\S]*?<\/a>/gi,"");
+      // Abra os dois grupos do menu para que Almoxarifado e Espaço do Colaborador
+      // fiquem visíveis logo após o login, sem o usuário precisar expandir seções.
+      updated = updated.replace(/<details class="nav-bloco-v325"(?![^>]*\bopen\b)/g,'<details class="nav-bloco-v325" open');
+    } else if (podeVerLink && !updated.includes('href="/almoxarifado"')) {
+      const re = /(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/;
+      updated = updated.replace(re,(whole,open,inner,close)=>open+inner+link+close);
+    }
+
+    if (gestor && !almoxarife && !updated.includes('href="/almoxarifado/chat"')) {
+      let seen=0;
+      updated = updated.replace(/(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/g,(whole,open,inner,close)=>{
+        seen++;
+        if(seen===2)return open+inner+chat+close;
+        return whole;
+      });
+    }
   }
 
   const headers = new Headers(response.headers);
