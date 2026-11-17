@@ -50,14 +50,15 @@ test('headers de segurança incluem no-sniff e política de frame', () => {
 });
 
 
-test('ficha de produção usa o renderizador de etapa existente', async () => {
+test('ficha de produção usa o renderizador atual de etapas e mantém ações especiais', async () => {
   const source = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
   const inicio = source.indexOf('function cardEtapaFichaV3417(');
   const fim = source.indexOf('function blocoArcada(', inicio);
   assert.ok(inicio >= 0 && fim > inicio, 'função de renderização da ficha deve existir');
   const helper = source.slice(inicio, fim);
-  assert.ok(helper.includes('const html = cardEtapaBaseV336(usuario, etapa);'));
-  assert.ok(!helper.includes('cardEtapa(usuario, etapa)'));
+  assert.ok(helper.includes('cardProducaoV336(usuario, etapa, "etapas")'));
+  assert.ok(helper.includes('formularioResponsavelProjetoConcluidoV3417('));
+  assert.ok(helper.includes('formularioDesfazerConclusaoAcabamentoV351('));
 });
 
 test('pacotes excluídos não aparecem nas listagens digitais', async () => {
@@ -73,27 +74,32 @@ test('pacotes excluídos não aparecem nas listagens digitais', async () => {
 });
 
 
-test('ficha do paciente renderiza componentes com a função existente', async () => {
+test('ficha de produção encaminha componentes ao renderizador atual', async () => {
   const source = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
-  const inicio = source.indexOf('function blocoArcada(');
-  const fim = source.indexOf('function blocoRetrabalhosBaseV336(', inicio);
-  assert.ok(inicio >= 0 && fim > inicio, 'bloco de arcada deve existir');
+  const inicio = source.indexOf('function cardProducaoV336(');
+  const fim = source.indexOf('function cardEtapaFichaV3417(', inicio);
+  assert.ok(inicio >= 0 && fim > inicio, 'despachante de cartões de produção deve existir');
   const bloco = source.slice(inicio, fim);
-  assert.ok(bloco.includes('cardComponenteBaseV336('));
-  assert.ok(!bloco.includes('cardComponente('));
+  assert.ok(bloco.includes('cardEtapaBaseV336(u, r)'));
+  assert.ok(bloco.includes('cardComponenteBaseV336(u, r)'));
+  assert.ok(bloco.includes('htmlRetrabalhoV336(u, r)'));
 });
 
-test('rota direta do trabalho consulta o paciente e monta a ficha completa', async () => {
+test('rota GET direta do trabalho carrega paciente, etapas e componentes com permissão', async () => {
   const source = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
-  const inicio = source.indexOf('/* ABRIR TRABALHO */');
-  const fim = source.indexOf('/* CHAT */', inicio);
-  assert.ok(inicio >= 0 && fim > inicio, 'rota GET de abertura do trabalho deve existir');
+  const autorizacao = source.indexOf('usuarioPodeVerTrabalhoDigitalV345(env, usuario, id)');
+  assert.ok(autorizacao >= 0, 'verificação de acesso ao trabalho deve existir');
+  const inicio = source.lastIndexOf('match = caminho.match(', autorizacao);
+  const fim = source.indexOf('match = caminho.match(', autorizacao + 1);
+  assert.ok(inicio >= 0 && fim > inicio, 'rota GET direta de trabalho deve estar delimitada');
   const rota = source.slice(inicio, fim);
-  assert.ok(rota.includes('caminho.match('));
-  assert.ok(rota.includes('trabalhos'));
+  assert.ok(rota.includes('^\\/trabalhos\\/(\\d+)
+));
+  assert.ok(rota.includes('request.method === "GET"'));
   assert.ok(rota.includes('await obterTrabalho('));
-  assert.ok(rota.includes('usuarioPodeVerTrabalhoDigitalV345'));
+  assert.ok(rota.includes('usuarioPodeVerTrabalhoDigitalV345(env, usuario, id)'));
   assert.ok(rota.includes('paginaFicha('));
   assert.ok(rota.includes('await listarEtapas('));
   assert.ok(rota.includes('await listarComponentes('));
+  assert.ok(rota.includes('await listarRetrabalhos('));
 });
