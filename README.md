@@ -6,7 +6,7 @@ Aplicação central do laboratório. Site, Windows e Android acessam o mesmo Wor
 
 - Endereço: https://app.markfree.com.br/
 - Worker: fluxo-lab
-- Versão de referência sincronizada neste repositório: V5.8.8
+- Versão de referência sincronizada neste repositório: V5.9.0
 - Código-fonte canônico: worker/
 - Os clientes Windows e Android são interfaces de acesso ao mesmo sistema web; não mantêm banco de dados independente.
 
@@ -25,7 +25,7 @@ O segredo CLOUDFLARE_API_TOKEN deve existir em Settings > Secrets and variables 
 
 - worker/: fonte de verdade do Worker de produção.
 - worker/releases/: snapshots imutáveis de versões já publicadas, usados para auditoria e recuperação.
-- worker/modules/: módulos puros e testáveis, incluindo o catálogo de emblemas.
+- worker/modules/: módulos puros e testáveis.
 - tests/: testes automatizados.
 - docs/: arquitetura, segurança, migrações e procedimentos.
 - desktop/ e android/: clientes nativos que abrem o endereço oficial.
@@ -51,4 +51,5 @@ Com Node.js 22.18 ou superior:
 - Na pasta worker/: npm install --no-package-lock e npm run check.
 - Na raiz: node --test tests/worker-core.test.mjs.
 - Na raiz: node --test tests/achievements.test.mjs.
+- Na raiz: node --test tests/rich-notes.test.mjs.
 - Na pasta worker/: npm run check:cf valida a configuração com dry-run e não publica.

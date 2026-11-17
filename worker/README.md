@@ -1,4 +1,4 @@
-# Fluxo Lab Worker V5.8.8
+# Fluxo Lab Worker V5.9.0
 
 Fonte oficial do Worker de produção. O navegador, o aplicativo Windows e o aplicativo Android acessam o mesmo sistema:
 
@@ -6,7 +6,13 @@ Fonte oficial do Worker de produção. O navegador, o aplicativo Windows e o apl
 - Worker: fluxo-lab
 - Código-fonte de desenvolvimento: este diretório worker/
 - Ponto de entrada: index.js
-- Módulos do Worker: core/, domains/, routes/ e services/
+- Módulos do Worker: core/, domains/, routes/, services/ e modules/
+
+## Novidade da V5.9.0
+
+A tela Minhas anotações agora oferece negrito e marca-texto amarelo, vermelho, verde e azul. A formatação é salva, sanitizada no servidor e preservada ao reabrir a anotação. As anotações antigas em texto puro continuam compatíveis.
+
+Nenhuma migração D1 é necessária. O site, o Windows e o Android continuam conectados ao mesmo Worker e recebem a atualização pelo sistema central.
 
 ## Caminho único de atualização
 
