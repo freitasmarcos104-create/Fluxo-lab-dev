@@ -680,7 +680,7 @@ async function dadosChatAlmoxarifado(env) {
   return mensagens.reverse();
 }
 
-function renderChatAlmoxarifado(mensagens,user) {
+function renderChatAlmoxarifado(mensagens,user,notice="") {
   const linhas = mensagens.map((m) => {
     const propria = Number(m.usuario_id) === Number(user.id);
     return '<article class="almox-chat-msg ' + (propria ? 'almox-chat-propria' : '') + '">' +
@@ -693,15 +693,16 @@ function renderChatAlmoxarifado(mensagens,user) {
     '<div class="almox-chat-lista">' + corpo + '</div>' +
     '<form method="POST" action="/almoxarifado/chat" class="almox-chat-form">' +
     '<label for="almox-chat-mensagem">Mensagem</label><textarea id="almox-chat-mensagem" name="mensagem" rows="2" minlength="1" maxlength="1500" required placeholder="Escreva para a equipe..."></textarea>' +
-    '<div class="acoes"><button type="submit">Enviar mensagem</button></div></form></section>',true,"",true));
+    '<div class="acoes"><button type="submit">Enviar mensagem</button></div></form></section>',true,notice,true));
 }
 
 async function processarChatAlmoxarifado(request,env,user) {
   if (!(await podeAcessarChatAlmoxarifado(env,user))) {
-    return respostaHtml(layoutAlmox(user,"chat",'<section class="panel"><p>Acesso restrito à equipe do Almoxarifado.</p></section>',false),403);
+    return respostaJson({erro:"Acesso restrito à equipe do Almoxarifado."},403);
   }
   if (request.method === "GET") {
-    return renderChatAlmoxarifado(await dadosChatAlmoxarifado(env),user);
+    const notice=String(new URL(request.url).searchParams.get("ok") || new URL(request.url).searchParams.get("erro") || "");
+    return renderChatAlmoxarifado(await dadosChatAlmoxarifado(env),user,notice);
   }
   if (request.method !== "POST") return respostaJson({erro:"Método não permitido."},405);
   const form=await request.formData();
@@ -892,12 +893,14 @@ export function atualizarIdentificacaoVersaoAlmoxarifado(conteudo, pathname) {
 
 
 export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
-  if (!respostaAlmox || !responseShell || respostaAlmox.status !== 200 || responseShell.status !== 200) return respostaAlmox;
+  if (!respostaAlmox || !responseShell || respostaAlmox.status !== 200 || responseShell.status !== 200) {
+    return new Response("Área do Almoxarifado indisponível no momento.",{status:500,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}});
+  }
   const [htmlAlmox,htmlShell]=await Promise.all([respostaAlmox.text(),responseShell.text()]);
   const almoxStart=htmlAlmox.indexOf('<main class="wrap">');
   const almoxOpenEnd=almoxStart>=0 ? htmlAlmox.indexOf(">",almoxStart)+1 : -1;
   const almoxClose=almoxOpenEnd>0 ? htmlAlmox.indexOf("</main>",almoxOpenEnd) : -1;
-  if (almoxStart<0 || almoxOpenEnd<=0 || almoxClose<0) return respostaAlmox;
+  if (almoxStart<0 || almoxOpenEnd<=0 || almoxClose<0) return new Response("Não foi possível integrar a área do Almoxarifado ao Fluxo Lab.",{status:500,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}});
   const shellStart=htmlShell.indexOf('<main class="container">');
   const shellOpenEnd=shellStart>=0 ? htmlShell.indexOf(">",shellStart)+1 : -1;
   const shellClose=shellOpenEnd>0 ? htmlShell.indexOf("</main>",shellOpenEnd) : -1;

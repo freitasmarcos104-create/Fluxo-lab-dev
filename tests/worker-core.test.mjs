@@ -143,9 +143,9 @@ test("migração protege saldo, validade e imutabilidade diretamente no D1", asy
 test("ponto de entrada encaminha somente o Almoxarifado e preserva o Worker legado", async () => {
   const source = await readFile(new URL("../worker/index.js", import.meta.url), "utf8");
   assert.ok(source.includes('import legado from "./legacy.js"'));
-  assert.match(source, /return handleAlmoxarifado/);
+  assert.match(source, /const respostaAlmox = await handleAlmoxarifado/);
   assert.ok(source.includes("legado.fetch(request, env, ctx)"));
-  assert.match(source, /injetarLinkAlmoxarifado/);
+  assert.match(source, /integrarTelaAlmoxarifado/);
 });
 
 test("requisições respeitam os setores vinculados ao usuário", () => {
@@ -178,15 +178,16 @@ test("funcionário Almoxarife entra no painel exclusivo e não acessa páginas g
   assert.equal(deveBloquearRotaAlmoxarife(false, "/funcionarios", "GET"), false);
 });
 
-test("topo exclusivo do Almoxarifado não oferece retorno às funções gerais e mantém Sair", async () => {
+test("o Almoxarifado mantém navegação interna por permissões e o Sair no shell padrão", async () => {
   const source = await readFile(new URL("../worker/modules/almoxarifado.js", import.meta.url), "utf8");
   const inicio = source.indexOf("function layoutAlmox(");
   const fim = source.indexOf("async function renderView(", inicio);
   assert.ok(inicio >= 0 && fim > inicio);
   const layout = source.slice(inicio, fim);
+  assert.match(layout, /Consultar materiais/);
+  assert.match(layout, /Requisições/);
   assert.match(layout, /Área exclusiva · Almoxarifado/);
   assert.match(layout, /action="\/logout"/);
-  assert.match(layout, /almoxarifeExclusivo\s*\?/);
 });
 
 test("o vínculo ativo de funcionário do Almoxarifado é identificado separadamente", async () => {
@@ -239,7 +240,7 @@ test("injeta menu e versão atualizada no HTML servido pelo Worker legado", asyn
     new Request("https://app.markfree.com.br/funcionarios")
   );
   const html = await response.text();
-  assert.match(html, /V5.11.0/);
+  assert.match(html, /V5.12.0/);
   assert.match(html, /href="\/almoxarifado"/);
   assert.equal(response.headers.get("content-length"), null);
 });
@@ -257,7 +258,7 @@ test("página do Almoxarifado usa o layout e o menu lateral nativos do Fluxo Lab
   assert.match(html, /sidebar/);
   assert.match(html, /topbar-titulo/);
   assert.match(html, /Almoxarifado · Fluxo Lab/);
-  assert.match(html, /<strong>Almoxarifado<\\/strong>/);
+  assert.ok(html.includes("<strong>Almoxarifado</strong>"));
   assert.match(html, /estilo-almoxarifado-integrado/);
   assert.match(html, /almox-integrado/);
   assert.doesNotMatch(html, /<main class="wrap">/);
