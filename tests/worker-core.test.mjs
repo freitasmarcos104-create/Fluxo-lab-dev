@@ -219,15 +219,15 @@ test("conta de almoxarife usa área independente e não ganha acesso de produç�
   assert.match(source, /processarEquipeAlmoxarifado/);
 });
 
-test("interface identifica a versão 5.13.0 nas páginas HTML", () => {
+test("interface identifica a versão 5.13.1 nas páginas HTML", () => {
   const html = '<title>Fluxo Lab V5.9.0</title><span>V5.10.0 · V5.11.0 · V5.12.0</span>';
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(html, "/funcionarios"),
-    '<title>Fluxo Lab V5.13.0</title><span>V5.13.0 · V5.13.0 · V5.13.1</span>'
+    '<title>Fluxo Lab V5.13.1</title><span>V5.13.1 · V5.13.1 · V5.13.1</span>'
   );
 });
 
-test("service worker recebe uma chave de cache nova na V5.13.0", () => {
+test("service worker recebe uma chave de cache nova na V5.13.1", () => {
   const source = "const FLUXO_CACHE='fluxo-lab-v5.9.0';const OLD='fluxo-lab-v5.10.0';const PREV='fluxo-lab-v5.11.0';";
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(source, "/service-worker.js"),
@@ -242,7 +242,7 @@ test("injeta menu e versão atualizada no HTML servido pelo Worker legado", asyn
     new Request("https://app.markfree.com.br/funcionarios")
   );
   const html = await response.text();
-  assert.match(html, /V5.13.0/);
+  assert.match(html, /V5.13.1/);
   assert.match(html, /href="\/almoxarifado"/);
   assert.equal(response.headers.get("content-length"), null);
 });
@@ -267,8 +267,8 @@ test("o menu do Almoxarife mantém exatamente um atalho para o Chat Geral", asyn
   );
   const html = await response.text();
   assert.match(html,/Chat Geral/);
-  assert.equal((html.match(/href="\\/digital\\/chat-equipe"/g)||[]).length,1);
-  assert.match(html,/href="\\/almoxarifado"/);
+  assert.equal(html.split('href="/digital/chat-equipe"').length - 1,1);
+  assert.ok(html.includes('href="/almoxarifado"'));
 });
 
 test("Espaço do Colaborador do Almoxarife preserva ferramentas pessoais sem mostrar produção", () => {
