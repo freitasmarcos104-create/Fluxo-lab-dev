@@ -327,17 +327,36 @@ async function alterarStatusLote(env, body) {
 async function dadosItens(env, busca = "") {
   const termo = String(busca || "").trim().toLowerCase();
   return todos(env.db,
-    "SELECT i.*,COALESCE(SUM(s.saldo),0) AS saldo_total,COALESCE(SUM(CASE WHEN s.status_lote='DISPONIVEL' AND (s.validade IS NULL OR s.validade>=date('now')) THEN s.saldo ELSE 0 END),0) AS saldo_disponivel FROM almoxarifado_itens i LEFT JOIN almoxarifado_saldos_lotes s ON s.item_id=i.id WHERE i.ativo=1 AND (?='' OR lower(i.codigo) LIKE ? OR lower(i.nome) LIKE ?) GROUP BY i.id ORDER BY i.nome COLLATE NOCASE",
+    "SELECT i.*,COALESCE(i.tipo_catalogo,i.tipo) AS tipo_exibicao," +
+    "COALESCE(SUM(s.saldo),0) AS saldo_total," +
+    "COALESCE(SUM(CASE WHEN l.estoque='ALMOXARIFADO' THEN s.saldo ELSE 0 END),0) AS saldo_almoxarifado," +
+    "COALESCE(SUM(CASE WHEN l.estoque='IMPRESSAO' THEN s.saldo ELSE 0 END),0) AS saldo_impressao," +
+    "COALESCE(SUM(CASE WHEN l.estoque='ALMOXARIFADO' AND l.status='DISPONIVEL' AND (l.validade IS NULL OR l.validade>=date('now')) THEN s.saldo ELSE 0 END),0) AS saldo_almoxarifado_disponivel," +
+    "COALESCE(SUM(CASE WHEN l.estoque='IMPRESSAO' AND l.status='DISPONIVEL' AND (l.validade IS NULL OR l.validade>=date('now')) THEN s.saldo ELSE 0 END),0) AS saldo_impressao_disponivel " +
+    "FROM almoxarifado_itens i LEFT JOIN almoxarifado_saldos_lotes s ON s.item_id=i.id " +
+    "LEFT JOIN almoxarifado_lotes l ON l.id=s.lote_id " +
+    "WHERE i.ativo=1 AND (?='' OR lower(i.codigo) LIKE ? OR lower(i.nome) LIKE ?) " +
+    "GROUP BY i.id ORDER BY i.nome COLLATE NOCASE",
     termo, "%" + termo + "%", "%" + termo + "%");
 }
+
 
 async function dadosLotes(env, itemId = 0) {
   const filtro = Number(itemId) > 0 ? " AND s.item_id=?" : "";
   const params = Number(itemId) > 0 ? [Number(itemId)] : [];
   return todos(env.db,
-    "SELECT s.*,i.codigo,i.nome,i.unidade,i.controla_lote,CASE WHEN s.status_lote='BLOQUEADO' THEN 'BLOQUEADO' WHEN s.status_lote='QUARENTENA' THEN 'QUARENTENA' WHEN s.status_lote='VENCIDO' THEN 'VENCIDO' WHEN s.validade IS NOT NULL AND s.validade<date('now') THEN 'VENCIDO' ELSE 'DISPONIVEL' END AS status_exibicao FROM almoxarifado_saldos_lotes s JOIN almoxarifado_itens i ON i.id=s.item_id WHERE 1=1" + filtro + " ORDER BY CASE WHEN s.validade IS NULL THEN 1 ELSE 0 END,s.validade ASC,s.recebido_em ASC,s.lote_id ASC",
+    "SELECT s.*,i.codigo,i.nome,i.unidade,COALESCE(i.tipo_catalogo,i.tipo) AS tipo_exibicao," +
+    "i.controla_lote,l.estoque,l.lote_origem_id,COALESCE(p.codigo_lote,l.codigo_lote) AS codigo_lote_exibicao," +
+    "CASE WHEN l.status='BLOQUEADO' THEN 'BLOQUEADO' WHEN l.status='QUARENTENA' THEN 'QUARENTENA' " +
+    "WHEN l.status='VENCIDO' THEN 'VENCIDO' WHEN l.validade IS NOT NULL AND l.validade<date('now') THEN 'VENCIDO' " +
+    "ELSE 'DISPONIVEL' END AS status_exibicao " +
+    "FROM almoxarifado_saldos_lotes s JOIN almoxarifado_itens i ON i.id=s.item_id " +
+    "JOIN almoxarifado_lotes l ON l.id=s.lote_id LEFT JOIN almoxarifado_lotes p ON p.id=l.lote_origem_id " +
+    "WHERE 1=1" + filtro +
+    " ORDER BY CASE WHEN s.validade IS NULL THEN 1 ELSE 0 END,s.validade ASC,s.recebido_em ASC,s.lote_id ASC",
     ...params);
 }
+
 
 async function dadosRequisicoes(env, solicitante = null) {
   const filtro = solicitante ? " WHERE r.solicitante_id=?" : "";
@@ -349,13 +368,18 @@ async function dadosRequisicoes(env, solicitante = null) {
 
 async function dadosMovimentos(env) {
   return todos(env.db,
-    "SELECT m.*,i.codigo,i.nome AS item_nome,i.unidade,l.codigo_lote,u.nome AS usuario_nome FROM almoxarifado_movimentos m JOIN almoxarifado_itens i ON i.id=m.item_id JOIN almoxarifado_lotes l ON l.id=m.lote_id LEFT JOIN usuarios u ON u.id=m.usuario_id ORDER BY m.id DESC LIMIT 200");
+    "SELECT m.*,i.codigo,i.nome AS item_nome,i.unidade,COALESCE(p.codigo_lote,l.codigo_lote) AS codigo_lote," +
+    "u.nome AS usuario_nome FROM almoxarifado_movimentos m " +
+    "JOIN almoxarifado_itens i ON i.id=m.item_id JOIN almoxarifado_lotes l ON l.id=m.lote_id " +
+    "LEFT JOIN almoxarifado_lotes p ON p.id=l.lote_origem_id " +
+    "LEFT JOIN usuarios u ON u.id=m.usuario_id ORDER BY m.id DESC LIMIT 200");
 }
+
 
 async function dadosPainel(env) {
   const results = await Promise.all([
     primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_itens WHERE ativo=1"),
-    primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_saldos_itens WHERE saldo_disponivel<quantidade_minima"),
+    primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_saldos_itens WHERE saldo_disponivel=0"),
     primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_status_requisicoes WHERE status IN ('ABERTA','PARCIAL')"),
     dadosLotes(env)
   ]);
@@ -364,15 +388,17 @@ async function dadosPainel(env) {
     const limite = new Date();
     limite.setDate(limite.getDate() + dias);
     const ate = limite.toISOString().slice(0, 10);
-    return results[3].filter((l) => Number(l.saldo) > 0 && l.validade && l.validade >= hoje && l.validade <= ate && l.status_exibicao === "DISPONIVEL").length;
+    return results[3].filter((l) => Number(l.saldo) > 0 && l.validade &&
+      l.validade >= hoje && l.validade <= ate && l.status_exibicao === "DISPONIVEL").length;
   };
   return {
     itens: Number(results[0]?.total || 0),
-    abaixo_minimo: Number(results[1]?.total || 0),
+    sem_estoque: Number(results[1]?.total || 0),
     requisicoes_abertas: Number(results[2]?.total || 0),
     vencendo_30: expira(30), vencendo_60: expira(60), vencendo_90: expira(90)
   };
 }
+
 
 function classeStatus(value) {
   const v = String(value || "").toUpperCase();
@@ -382,38 +408,43 @@ function classeStatus(value) {
 }
 
 function selItens(itens) {
-  return '<option value="">Selecione um item</option>' + itens.map((item) =>
-    '<option value="' + item.id + '">' + escaparHtmlAlmox(item.codigo + " · " + item.nome + " (" + item.unidade + ")") + "</option>"
+  return '<option value="">Selecione um material</option>' + itens.map((item) =>
+    '<option value="' + item.id + '">' + escaparHtmlAlmox(item.nome + " (" + item.unidade + ")") + "</option>"
   ).join("");
 }
 
+
 function renderTabelaItens(itens, gerente = true) {
-  if (!itens.length) return '<p class="vazio">Nenhum item cadastrado.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Código</th><th>Item</th><th>Tipo</th><th>Disponível</th><th>Total físico</th><th>Mínimo</th><th>Controle</th><th>Situação</th></tr></thead><tbody>' +
+  if (!itens.length) return '<p class="vazio">Nenhum material cadastrado.</p>';
+  return '<div class="tabela-wrap"><table><thead><tr><th>Código</th><th>Material</th><th>Tipo</th><th>Almoxarifado</th><th>Impressão</th><th>Total</th><th>Situação</th></tr></thead><tbody>' +
     itens.map((item) => {
-      const saldo = Number(item.saldo_disponivel || 0);
+      const almox = Number(item.saldo_almoxarifado || 0);
+      const impressao = Number(item.saldo_impressao || 0);
       const total = Number(item.saldo_total || 0);
-      const minimo = Number(item.quantidade_minima || 0);
-      const status = saldo <= 0 ? "SEM ESTOQUE DISPONÍVEL" : saldo < minimo ? "ABAIXO DO MÍNIMO" : "NORMAL";
+      const status = almox > 0 ? "NO ALMOXARIFADO" : impressao > 0 ? "SOMENTE IMPRESSÃO" : "SEM ESTOQUE";
       const nome = gerente
         ? '<a href="/almoxarifado?view=item&id=' + item.id + '">' + escaparHtmlAlmox(item.nome) + '</a>'
         : '<strong>' + escaparHtmlAlmox(item.nome) + '</strong>';
-      return '<tr><td>' + escaparHtmlAlmox(item.codigo) + '</td><td>' + nome +
-        '</td><td>' + escaparHtmlAlmox(item.tipo) + '</td><td class="numero">' + saldo + " " + escaparHtmlAlmox(item.unidade) +
-        '</td><td class="numero">' + total + " " + escaparHtmlAlmox(item.unidade) + '</td><td class="numero">' + minimo +
-        '</td><td>' + (item.controla_lote ? "Lote e validade" : "Lote interno") +
+      const codigo = String(item.codigo || "").startsWith("AUTO-") ? "—" : (item.codigo || "—");
+      return '<tr><td>' + escaparHtmlAlmox(codigo) + '</td><td>' + nome +
+        '</td><td>' + escaparHtmlAlmox(item.tipo_exibicao || item.tipo) +
+        '</td><td class="numero">' + almox + " " + escaparHtmlAlmox(item.unidade) +
+        '</td><td class="numero">' + impressao + " " + escaparHtmlAlmox(item.unidade) +
+        '</td><td class="numero">' + total + " " + escaparHtmlAlmox(item.unidade) +
         '</td><td><span class="status ' + classeStatus(status) + '">' + status + "</span></td></tr>";
     }).join("") + "</tbody></table></div>";
 }
 
+
 function renderTabelaLotes(lotes, gerente) {
   if (!lotes.length) return '<p class="vazio">Nenhum lote registrado.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Item</th><th>Lote</th><th>Validade</th><th>Local</th><th>Saldo</th><th>Situação</th>' +
+  return '<div class="tabela-wrap"><table><thead><tr><th>Material</th><th>Lote</th><th>Validade</th><th>Estoque</th><th>Saldo</th><th>Situação</th>' +
     (gerente ? "<th>Controle</th>" : "") + '</tr></thead><tbody>' +
-    lotes.map((l) => '<tr><td>' + escaparHtmlAlmox(l.codigo + " · " + l.nome) + '</td><td>' +
-      escaparHtmlAlmox(l.codigo_lote + (l.controla_lote ? "" : " · interno")) + '</td><td>' + escaparHtmlAlmox(l.validade || "—") +
-      '</td><td>' + escaparHtmlAlmox(l.localizacao) + '</td><td class="numero">' + Number(l.saldo || 0) + " " +
-      escaparHtmlAlmox(l.unidade) + '</td><td><span class="status ' + classeStatus(l.status_exibicao) + '">' + escaparHtmlAlmox(l.status_exibicao) +
+    lotes.map((l) => '<tr><td>' + escaparHtmlAlmox(l.nome) + '</td><td>' +
+      escaparHtmlAlmox(codigoLoteExibido(l) + (l.lote_origem_id ? " · transferido" : "")) + '</td><td>' +
+      escaparHtmlAlmox(l.validade || "—") + '</td><td>' + textoEstoqueAlmox(l.estoque) +
+      '</td><td class="numero">' + Number(l.saldo || 0) + " " + escaparHtmlAlmox(l.unidade) +
+      '</td><td><span class="status ' + classeStatus(l.status_exibicao) + '">' + escaparHtmlAlmox(l.status_exibicao) +
       "</span></td>" + (gerente ? '<td><form class="linha-form" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="status_lote">' +
       '<input type="hidden" name="lote_id" value="' + l.lote_id + '"><select name="status" required><option value="">Alterar situação...</option><option value="DISPONIVEL">Disponível</option>' +
       '<option value="QUARENTENA">Quarentena</option><option value="BLOQUEADO">Bloqueado</option></select><button class="secundario">Salvar</button></form></td>' : "") +
@@ -421,16 +452,24 @@ function renderTabelaLotes(lotes, gerente) {
     ).join("") + "</tbody></table></div>";
 }
 
+
 function renderTabelaMovimentos(movimentos) {
   if (!movimentos.length) return '<p class="vazio">Ainda não existem movimentos.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Data</th><th>Item</th><th>Lote</th><th>Movimento</th><th>Quantidade</th><th>Origem</th><th>Local</th><th>Usuário</th><th>Motivo</th></tr></thead><tbody>' +
-    movimentos.map((m) => '<tr><td>' + escaparHtmlAlmox(m.criado_em) + '</td><td>' + escaparHtmlAlmox(m.codigo + " · " + m.item_nome) +
-      '</td><td>' + escaparHtmlAlmox(m.codigo_lote) + '</td><td>' + escaparHtmlAlmox(m.tipo) + '</td><td class="numero">' +
-      Number(m.quantidade) + " " + escaparHtmlAlmox(m.unidade) + '</td><td>' + escaparHtmlAlmox(m.origem_tipo || "—") +
-      '</td><td>' + escaparHtmlAlmox([m.local_origem,m.local_destino].filter(Boolean).join(" → ") || "—") +
-      '</td><td>' + escaparHtmlAlmox(m.usuario_nome || "—") + '</td><td>' + escaparHtmlAlmox(m.motivo || "—") + "</td></tr>"
-    ).join("") + "</tbody></table></div>";
+  return '<div class="tabela-wrap"><table><thead><tr><th>Data</th><th>Material</th><th>Movimento</th><th>Quantidade</th><th>Estoque</th><th>Usuário</th><th>Observação</th></tr></thead><tbody>' +
+    movimentos.map((m) => {
+      const transferencia = ["TRANSFERENCIA","TRANSFERENCIA_RECEBIDA"].includes(m.origem_tipo);
+      const tipo = m.origem_tipo === "TRANSFERENCIA" ? "SAÍDA PARA IMPRESSÃO" :
+        m.origem_tipo === "TRANSFERENCIA_RECEBIDA" ? "ENTRADA NA IMPRESSÃO" : m.tipo;
+      const estoque = m.origem_tipo === "TRANSFERENCIA" ? "Almoxarifado → Impressão" :
+        m.origem_tipo === "TRANSFERENCIA_RECEBIDA" || m.origem_tipo === "CONSUMO_IMPRESSAO" ? "Impressão" : "Almoxarifado";
+      return '<tr><td>' + escaparHtmlAlmox(m.criado_em) + '</td><td>' +
+        escaparHtmlAlmox(m.item_nome + " · " + codigoLoteExibido(m)) + '</td><td>' + tipo +
+        '</td><td class="numero">' + Number(m.quantidade) + " " + escaparHtmlAlmox(m.unidade) +
+        '</td><td>' + estoque + '</td><td>' + escaparHtmlAlmox(m.usuario_nome || "—") +
+        '</td><td>' + escaparHtmlAlmox(m.motivo || (transferencia ? "Transferência interna" : "—")) + "</td></tr>";
+    }).join("") + "</tbody></table></div>";
 }
+
 
 function renderRequisicoes(requisicoes, lotes, gerente) {
   if (!requisicoes.length) return '<p class="vazio">Nenhuma requisição registrada.</p>';
@@ -448,33 +487,33 @@ function renderRequisicoes(requisicoes, lotes, gerente) {
       (gerente && restante > 0 ? '<form class="linha-form" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="atender">' +
         '<input type="hidden" name="requisicao_item_id" value="' + r.requisicao_item_id + '"><select name="lote_id" required>' +
         '<option value="">Lote sugerido (FEFO)</option>' + opcoes + "</select>" +
-        '<input name="quantidade" type="number" min="0.001" max="' + restante + '" step="0.001" value="' + restante + '" required>' +
+        '<input name="quantidade" type="number" min="1" max="' + restante + '" step="1" value="' + restante + '" required>' +
         '<button>Confirmar saída</button></form>' : "") + "</article>";
   }).join("") + "</div>";
 }
 
 function formularioItem() {
   return '<form class="form-grid" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="criar_item">' +
-    '<label>Código<input name="codigo" maxlength="40" required></label><label>Nome<input name="nome" maxlength="120" required></label>' +
+    '<label>Código (opcional)<input name="codigo" maxlength="40" placeholder="Pode deixar em branco"></label>' +
+    '<label>Nome do material<input name="nome" maxlength="120" required placeholder="Ex.: Smart Dent Bite Splint"></label>' +
     '<label>Tipo<select name="tipo" required>' + TIPOS_ITEM.map((t) => '<option value="' + t + '">' + t + "</option>").join("") + '</select></label>' +
-    '<label>Unidade única<select name="unidade"><option>un</option><option>mL</option><option>g</option></select></label>' +
-    '<label>Local padrão<input name="local_padrao" maxlength="100" required placeholder="Ex.: Armário A"></label>' +
-    '<label>Estoque mínimo<input name="quantidade_minima" type="number" min="0" step="0.001" value="0" required></label>' +
-    '<p class="muted">Reagentes, padrões e kits exigem lote e validade automaticamente. Os demais tipos podem ativar esse controle.</p>' +
-    '<label class="checkbox"><input type="checkbox" name="controla_lote" value="1"> Controla lote e validade para este item</label>' +
-    '<div class="acoes"><button>Cadastrar item</button></div></form>';
+    '<label>Unidade<select name="unidade"><option value="un" selected>un</option><option value="mL">mL</option><option value="g">g</option></select></label>' +
+    '<div class="acoes"><button>Cadastrar material</button></div></form>' +
+    '<p class="muted">O código é criado automaticamente quando não for informado. As quantidades são sempre inteiras.</p>';
 }
+
 
 function formularioEntrada(itens) {
   return '<form class="form-grid" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="receber">' +
-    '<label class="largo">Item<select name="item_id" required>' + selItens(itens) + '</select></label>' +
-    '<label>Número do lote<input name="codigo_lote" maxlength="80" placeholder="Obrigatório para item rastreado"></label>' +
-    '<label>Validade<input name="validade" type="date"></label><label>Quantidade recebida<input name="quantidade" type="number" min="0.001" step="0.001" required></label>' +
-    '<label>Localização<input name="localizacao" maxlength="100" placeholder="Usa o local padrão se vazio"></label><label>Fornecedor<input name="fornecedor" maxlength="120"></label>' +
-    '<label>Nota / documento<input name="documento_entrada" maxlength="100"></label><label>Data de recebimento<input name="recebido_em" type="date" value="' +
-    new Date().toISOString().slice(0, 10) + '"></label><label>Situação<select name="status"><option value="DISPONIVEL">Conferido · disponível</option>' +
-    '<option value="QUARENTENA">Aguardando conferência · quarentena</option></select></label><div class="acoes"><button>Registrar entrada</button></div></form>';
+    '<label class="largo">Material<select name="item_id" required>' + selItens(itens) + '</select></label>' +
+    '<label>Quantidade recebida<input name="quantidade" type="number" min="1" step="1" value="1" required></label>' +
+    '<label>Lote (opcional)<input name="codigo_lote" maxlength="80" placeholder="Pode deixar em branco"></label>' +
+    '<label>Validade (opcional)<input name="validade" type="date"></label>' +
+    '<label>Fornecedor (opcional)<input name="fornecedor" maxlength="120"></label>' +
+    '<div class="acoes"><button>Registrar entrada</button></div></form>' +
+    '<p class="muted">Toda entrada vai diretamente para o estoque do Almoxarifado. A validade e o fornecedor podem ficar em branco.</p>';
 }
+
 
 function formularioRequisicao(itens, user) {
   const setores = setoresDisponiveisAlmox(user);
@@ -484,33 +523,42 @@ function formularioRequisicao(itens, user) {
     '<label>Setor<select name="setor" required>' + (setores.length > 1 ? '<option value="">Selecione seu setor</option>' : "") +
     opcoesSetor + '</select></label>' +
     '<label class="largo">Material<select name="item_id" required>' + selItens(itens) + '</select></label>' +
-    '<label>Quantidade<input name="quantidade" type="number" min="0.001" step="0.001" required></label>' +
-    '<label class="largo">Observação / finalidade<input name="observacao" maxlength="300" placeholder="Onde ou para que será usado?"></label>' +
+    '<label>Quantidade<input name="quantidade" type="number" min="1" step="1" value="1" required></label>' +
+    '<label class="largo">Observação (opcional)<input name="observacao" maxlength="300" placeholder="Para que será usado?"></label>' +
     '<div class="acoes"><button>Enviar requisição</button></div></form>';
 }
 
+
 function formularioOperacao(lotes) {
+  const disponiveis = lotes.filter((l) => l.estoque === "ALMOXARIFADO" &&
+    Number(l.saldo) > 0 && l.status_exibicao === "DISPONIVEL");
   return '<form class="form-grid" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="movimento_especial">' +
-    '<label class="largo">Lote<select name="lote_id" required><option value="">Selecione o lote</option>' +
-    lotes.filter((l) => Number(l.saldo) > 0).map((l) => '<option value="' + l.lote_id + '">' +
-      escaparHtmlAlmox(l.nome + " · " + l.codigo_lote + " · saldo " + l.saldo + " " + l.unidade + " · " + l.localizacao) + "</option>"
-    ).join("") + '</select></label><label>Operação<select name="tipo"><option value="PERDA">Perda</option>' +
-    '<option value="VENCIMENTO">Vencimento / descarte</option><option value="TRANSFERENCIA">Transferência de local</option></select></label>' +
-    '<label>Quantidade<input name="quantidade" type="number" min="0.001" step="0.001" required></label>' +
-    '<label>Local de destino (transferência)<input name="local_destino" maxlength="100"></label>' +
-    '<label class="largo">Motivo<input name="motivo" minlength="4" maxlength="300" required></label><div class="acoes"><button>Registrar movimento</button></div></form>';
+    '<label class="largo">Material<select name="lote_id" required><option value="">Selecione o material</option>' +
+    disponiveis.map((l) => '<option value="' + l.lote_id + '">' +
+      escaparHtmlAlmox(l.nome + " · saldo " + l.saldo + " " + l.unidade +
+        (l.validade ? " · validade " + l.validade : "")) + "</option>"
+    ).join("") + '</select></label>' +
+    '<label>Operação<select name="tipo"><option value="TRANSFERENCIA">Saída para Impressão</option>' +
+    '<option value="PERDA">Perda</option><option value="VENCIMENTO">Vencimento / descarte</option></select></label>' +
+    '<label>Quantidade<input name="quantidade" type="number" min="1" step="1" value="1" required></label>' +
+    '<label class="largo">Motivo / observação (opcional na transferência)<input name="motivo" maxlength="300" placeholder="Opcional para transferência"></label>' +
+    '<div class="acoes"><button>Registrar movimento</button></div></form>' +
+    '<p class="muted">A saída para Impressão reduz o Almoxarifado e aumenta o estoque Digital na mesma operação. Para perda ou descarte, o motivo continua obrigatório.</p>';
 }
+
 
 function formularioInventario(lotes) {
   if (!lotes.length) return '<p class="vazio">Nenhum lote para contagem.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Item</th><th>Lote</th><th>Local</th><th>Saldo do sistema</th><th>Contagem física / motivo</th></tr></thead><tbody>' +
-    lotes.map((l) => '<tr><td>' + escaparHtmlAlmox(l.nome) + '</td><td>' + escaparHtmlAlmox(l.codigo_lote) + '</td><td>' +
-      escaparHtmlAlmox(l.localizacao) + '</td><td>' + Number(l.saldo) + " " + escaparHtmlAlmox(l.unidade) + '</td><td><form class="linha-form" method="POST" action="/almoxarifado/acao">' +
+  return '<div class="tabela-wrap"><table><thead><tr><th>Material</th><th>Estoque</th><th>Saldo do sistema</th><th>Contagem física / motivo</th></tr></thead><tbody>' +
+    lotes.map((l) => '<tr><td>' + escaparHtmlAlmox(l.nome + " · " + codigoLoteExibido(l)) +
+      '</td><td>' + textoEstoqueAlmox(l.estoque) + '</td><td>' + Number(l.saldo) + " " +
+      escaparHtmlAlmox(l.unidade) + '</td><td><form class="linha-form" method="POST" action="/almoxarifado/acao">' +
       '<input type="hidden" name="acao" value="ajustar_inventario"><input type="hidden" name="lote_id" value="' + l.lote_id + '">' +
-      '<input name="quantidade_contada" type="number" min="0" step="0.001" value="' + Number(l.saldo) + '" required>' +
+      '<input name="quantidade_contada" type="number" min="0" step="1" value="' + Math.max(0,Math.round(Number(l.saldo))) + '" required>' +
       '<input name="motivo" minlength="4" maxlength="300" placeholder="Motivo da diferença" required><button class="secundario">Conferir</button></form></td></tr>'
     ).join("") + "</tbody></table></div>";
 }
+
 
 function layoutAlmox(user, view, content, gerente, notice = "", almoxarifeExclusivo = false) {
   const links = gerente
