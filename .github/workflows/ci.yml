@@ -33,7 +33,7 @@ jobs:
         run: npm run check:cf
         working-directory: worker
       - name: Run core tests
-        run: node --test tests/worker-core.test.mjs
+        run: node --test tests/worker-core.test.mjs tests/curso-anatomia.test.mjs
       - name: Validate Almoxarifado D1 migration with isolated SQLite
         run: python3 tests/almoxarifado_migration.test.py
       - name: Run achievements tests
