@@ -379,7 +379,7 @@ async function dadosMovimentos(env) {
 async function dadosPainel(env) {
   const results = await Promise.all([
     primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_itens WHERE ativo=1"),
-    primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_saldos_itens WHERE saldo_disponivel=0"),
+    primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_itens i WHERE i.ativo=1 AND NOT EXISTS (SELECT 1 FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.item_id=i.id AND l.estoque='ALMOXARIFADO' AND l.status='DISPONIVEL' AND (l.validade IS NULL OR l.validade>=date('now')) AND s.saldo>0)"),
     primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_status_requisicoes WHERE status IN ('ABERTA','PARCIAL')"),
     dadosLotes(env)
   ]);
@@ -565,7 +565,7 @@ function layoutAlmox(user, view, content, gerente, notice = "", almoxarifeExclus
   const links = linksOverride || (gerente
     ? [["dashboard","Painel"],["itens","Itens"],["entrada","Entrada"],["requisicoes","Requisições"],["lotes","Lotes"],["movimentos","Movimentos"],["inventario","Inventário"]]
     : [["itens","Consultar materiais"],["requisicoes","Requisições"]]);
-  const nav = links.map(([key,label]) => '<a class="' + (view === key ? "ativo" : "") + '" href="/almoxarifado?view=' + key + '">' + label + "</a>").join("");
+  const nav = links.map(([key,label]) => '<a class="' + (view === key ? "ativo" : "") + '" href="' + (key === "estoque" ? "/digital/estoque" : "/almoxarifado?view=" + key) + '">' + label + "</a>").join("");
   const css = [
     ":root{color-scheme:light;--ink:#17233b;--muted:#62708a;--line:#e3e9f2;--paper:#f4f7fb;--blue:#2872c8;--blue2:#e8f1ff;--green:#157347;--yellow:#946200;--red:#b42318}",
     "*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,sans-serif}",
