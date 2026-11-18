@@ -475,22 +475,23 @@ function renderRequisicoes(requisicoes, lotes, gerente) {
   if (!requisicoes.length) return '<p class="vazio">Nenhuma requisição registrada.</p>';
   return '<div class="lista-requisicoes">' + requisicoes.map((r) => {
     const restante = Math.max(0, Number(r.quantidade_solicitada) - Number(r.quantidade_atendida));
-    const disponiveis = lotes.filter((l) => Number(l.item_id) === Number(r.item_id) && Number(l.saldo) > 0 && l.status_exibicao === "DISPONIVEL");
+    const disponiveis = lotes.filter((l) => Number(l.item_id) === Number(r.item_id) &&
+      Number(l.saldo) > 0 && l.status_exibicao === "DISPONIVEL" && l.estoque === "ALMOXARIFADO");
     const opcoes = disponiveis.map((l) => '<option value="' + l.lote_id + '">' + escaparHtmlAlmox(
-      l.codigo_lote + (l.controla_lote ? "" : " · interno") + " · vence " + (l.validade || "sem validade") + " · saldo " + l.saldo + " " + l.unidade
-    ) + "</option>").join("");
-    return '<article class="requisicao"><div><strong>Requisição #' + r.requisicao_id + " · " + escaparHtmlAlmox(r.item_nome) +
-      '</strong><span class="status ' + classeStatus(r.status) + '">' + escaparHtmlAlmox(r.status) + "</span></div><p>Solicitante: " +
-      escaparHtmlAlmox(r.solicitante || "Usuário") + " · Setor: " + escaparHtmlAlmox(r.setor) + " · Pedido: " +
+      codigoLoteExibido(l) + " · saldo " + l.saldo + " " + l.unidade) + "</option>").join("");
+    return '<article class="requisicao"><div><strong>#' + r.requisicao_id + " · " + escaparHtmlAlmox(r.item_nome) +
+      '</strong><span class="status ' + classeStatus(r.status) + '">' + r.status + '</span></div><p>' +
+      escaparHtmlAlmox(r.solicitante || "Colaborador") + " · " + escaparHtmlAlmox(r.setor) + " · Pedido: " +
       Number(r.quantidade_solicitada) + " " + escaparHtmlAlmox(r.unidade) + " · Atendido: " + Number(r.quantidade_atendida) +
       " · Restante: " + restante + "</p>" + (r.observacao ? "<p>" + escaparHtmlAlmox(r.observacao) + "</p>" : "") +
       (gerente && restante > 0 ? '<form class="linha-form" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="atender">' +
         '<input type="hidden" name="requisicao_item_id" value="' + r.requisicao_item_id + '"><select name="lote_id" required>' +
-        '<option value="">Lote sugerido (FEFO)</option>' + opcoes + "</select>" +
+        '<option value="">Selecione o lote</option>' + opcoes + "</select>" +
         '<input name="quantidade" type="number" min="1" max="' + restante + '" step="1" value="' + restante + '" required>' +
         '<button>Confirmar saída</button></form>' : "") + "</article>";
   }).join("") + "</div>";
 }
+
 
 function formularioItem() {
   return '<form class="form-grid" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="criar_item">' +
@@ -560,10 +561,10 @@ function formularioInventario(lotes) {
 }
 
 
-function layoutAlmox(user, view, content, gerente, notice = "", almoxarifeExclusivo = false) {
-  const links = gerente
+function layoutAlmox(user, view, content, gerente, notice = "", almoxarifeExclusivo = false, linksOverride = null) {
+  const links = linksOverride || (gerente
     ? [["dashboard","Painel"],["itens","Itens"],["entrada","Entrada"],["requisicoes","Requisições"],["lotes","Lotes"],["movimentos","Movimentos"],["inventario","Inventário"]]
-    : [["itens","Consultar materiais"],["requisicoes","Requisições"]];
+    : [["itens","Consultar materiais"],["requisicoes","Requisições"]]);
   const nav = links.map(([key,label]) => '<a class="' + (view === key ? "ativo" : "") + '" href="/almoxarifado?view=' + key + '">' + label + "</a>").join("");
   const css = [
     ":root{color-scheme:light;--ink:#17233b;--muted:#62708a;--line:#e3e9f2;--paper:#f4f7fb;--blue:#2872c8;--blue2:#e8f1ff;--green:#157347;--yellow:#946200;--red:#b42318}",
@@ -605,57 +606,67 @@ async function renderView(env, user, url) {
   let content = "";
   let requisicoes = [];
   const notice = String(url.searchParams.get("ok") || url.searchParams.get("erro") || "");
+
   if (view === "dashboard") {
     const painel = await dadosPainel(env);
-    const abaixo = itens.filter((i) => Number(i.saldo_disponivel) < Number(i.quantidade_minima));
-    const vencendo = lotes.filter((l) => Number(l.saldo) > 0 && l.validade && l.validade >= new Date().toISOString().slice(0, 10) &&
-      l.validade <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) && l.status_exibicao === "DISPONIVEL");
+    const semEstoque = itens.filter((i) => Number(i.saldo_almoxarifado_disponivel || 0) <= 0);
+    const vencendo = lotes.filter((l) => Number(l.saldo) > 0 && l.validade &&
+      l.validade >= new Date().toISOString().slice(0, 10) &&
+      l.validade <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) &&
+      l.status_exibicao === "DISPONIVEL");
     content = '<div class="grid">' +
-      [["Itens ativos", painel.itens],["Abaixo do mínimo",painel.abaixo_minimo],["Requisições abertas",painel.requisicoes_abertas],["Vencendo em 30 dias",painel.vencendo_30]].map((x) =>
+      [["Materiais cadastrados",painel.itens],["Sem estoque no Almoxarifado",painel.sem_estoque],
+       ["Requisições abertas",painel.requisicoes_abertas],["Vencendo em 30 dias",painel.vencendo_30]].map((x) =>
         '<div class="card"><small>' + x[0] + "</small><strong>" + x[1] + "</strong></div>").join("") +
-      '</div><section class="panel"><h2>Alertas de validade</h2><div class="detail"><div><small>Até 30 dias</small><strong>' +
+      '</div><section class="panel"><h2>Validades próximas</h2><div class="detail"><div><small>Até 30 dias</small><strong>' +
       painel.vencendo_30 + '</strong></div><div><small>Até 60 dias</small><strong>' + painel.vencendo_60 +
       '</strong></div><div><small>Até 90 dias</small><strong>' + painel.vencendo_90 + '</strong></div></div>' +
       (vencendo.length ? renderTabelaLotes(vencendo,false) : '<p class="vazio">Nenhum lote disponível vence nos próximos 30 dias.</p>') +
-      '</section><section class="panel"><h2>Itens abaixo do mínimo</h2>' + renderTabelaItens(abaixo,gerente) + '</section>';
-    requisicoes = (await dadosRequisicoes(env, gerente ? null : user)).filter((r) => ["ABERTA","PARCIAL"].includes(r.status)).slice(0,8);
-    content += '<section class="panel"><h2>Requisições pendentes</h2>' + renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
+      '</section><section class="panel"><h2>Materiais sem saldo no Almoxarifado</h2>' + renderTabelaItens(semEstoque,gerente) + '</section>';
+    requisicoes = (await dadosRequisicoes(env,gerente ? null : user))
+      .filter((r) => ["ABERTA","PARCIAL"].includes(r.status)).slice(0,8);
+    content += '<section class="panel"><h2>Requisições pendentes</h2>' +
+      renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
   } else if (view === "itens") {
     const busca = String(url.searchParams.get("q") || "");
-    content = (gerente ? '<section class="panel"><h2>Novo item</h2>' + formularioItem() + '</section>' : "") +
-      '<section class="panel"><h2>Catálogo de materiais</h2><form class="linha-form" method="GET" action="/almoxarifado">' +
+    content = (gerente ? '<section class="panel"><h2>Cadastrar material</h2>' + formularioItem() + '</section>' : "") +
+      '<section class="panel"><h2>Estoque de materiais</h2><form class="linha-form" method="GET" action="/almoxarifado">' +
       '<input type="hidden" name="view" value="itens"><input name="q" value="' + escaparHtmlAlmox(busca) +
-      '" placeholder="Buscar por código ou nome"><button>Buscar</button></form><br>' + renderTabelaItens(itens,gerente) + '</section>';
+      '" placeholder="Buscar por nome ou código"><button>Buscar</button></form><br>' + renderTabelaItens(itens,gerente) + '</section>';
   } else if (view === "entrada") {
-    content = gerente ? '<section class="panel"><h2>Registrar recebimento</h2><p class="muted">O material conferido entra como disponível. Material pendente de checagem entra em quarentena.</p>' +
-      formularioEntrada(itens) + '</section>' : '<section class="panel"><p>Entrada de materiais restrita à administração e coordenação.</p></section>';
+    content = gerente ? '<section class="panel"><h2>Nova entrada</h2>' +
+      formularioEntrada(itens) + '</section>' :
+      '<section class="panel"><p>Entrada de materiais restrita aos responsáveis pelo Almoxarifado.</p></section>';
   } else if (view === "requisicoes") {
-    requisicoes = await dadosRequisicoes(env, gerente ? null : user);
+    requisicoes = await dadosRequisicoes(env,gerente ? null : user);
     content = '<section class="panel"><h2>Solicitar material</h2>' + formularioRequisicao(itens,user) + '</section>' +
       '<section class="panel"><h2>Pedidos registrados</h2>' + renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
   } else if (view === "lotes") {
-    content = '<section class="panel"><h2>Lotes e saldos</h2><p class="muted">Sugestão de atendimento ordenada por FEFO. Lotes vencidos, em quarentena ou bloqueados não podem ser usados em saídas comuns.</p>' +
+    content = '<section class="panel"><h2>Lotes e saldos</h2><p class="muted">Consulte os lotes e em qual estoque cada quantidade está disponível.</p>' +
       renderTabelaLotes(lotes,gerente) + '</section>';
   } else if (view === "movimentos") {
-    content = (gerente ? '<section class="panel"><h2>Perda, vencimento ou transferência</h2>' + formularioOperacao(lotes) + '</section>' : "");
-    content += '<section class="panel"><h2>Histórico imutável</h2>' + renderTabelaMovimentos(await dadosMovimentos(env)) + '</section>';
+    content = (gerente ? '<section class="panel"><h2>Saída para Impressão, perda ou vencimento</h2>' +
+      formularioOperacao(lotes) + '</section>' : "");
+    content += '<section class="panel"><h2>Histórico de movimentos</h2>' +
+      renderTabelaMovimentos(await dadosMovimentos(env)) + '</section>';
   } else if (view === "inventario") {
-    content = gerente ? '<section class="panel"><h2>Contagem física e ajuste</h2><p class="muted">Informe o saldo contado. A diferença será registrada como movimento de ajuste com o motivo, sem apagar o histórico.</p>' +
-      formularioInventario(lotes) + '</section>' : '<section class="panel"><p>Inventário restrito à administração e coordenação.</p></section>';
+    content = gerente ? '<section class="panel"><h2>Contagem física e ajuste</h2>' +
+      '<p class="muted">Informe a quantidade inteira encontrada. O histórico anterior será preservado.</p>' +
+      formularioInventario(lotes) + '</section>' :
+      '<section class="panel"><p>Inventário restrito aos responsáveis pelo Almoxarifado.</p></section>';
   } else if (view === "item") {
     const itemId = Number(url.searchParams.get("id") || 0);
     const item = itens.find((x) => Number(x.id) === itemId);
-    if (!item) content = '<section class="panel"><p>Item não encontrado.</p></section>';
+    if (!item) content = '<section class="panel"><p>Material não encontrado.</p></section>';
     else {
       const lotesItem = lotes.filter((x) => Number(x.item_id) === itemId);
       const movs = (await dadosMovimentos(env)).filter((x) => Number(x.item_id) === itemId);
-      content = '<section class="panel"><h2>' + escaparHtmlAlmox(item.codigo + " · " + item.nome) + '</h2><div class="detail">' +
-        '<div><small>Saldo disponível</small><strong>' + Number(item.saldo_disponivel) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
-        '<div><small>Saldo físico total</small><strong>' + Number(item.saldo_total) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
-        '<div><small>Estoque mínimo</small><strong>' + Number(item.quantidade_minima) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
-        '<div><small>Local padrão</small><strong>' + escaparHtmlAlmox(item.local_padrao) + '</strong></div>' +
-        '<div><small>Rastreabilidade</small><strong>' + (item.controla_lote ? "Lote e validade" : "Lote interno") + '</strong></div>' +
-        '</div></section><section class="panel"><h2>Lotes</h2>' + renderTabelaLotes(lotesItem,gerente) +
+      content = '<section class="panel"><h2>' + escaparHtmlAlmox(item.nome) + '</h2><div class="detail">' +
+        '<div><small>Estoque do Almoxarifado</small><strong>' + Number(item.saldo_almoxarifado) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
+        '<div><small>Estoque da Impressão</small><strong>' + Number(item.saldo_impressao) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
+        '<div><small>Total nos dois estoques</small><strong>' + Number(item.saldo_total) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
+        '<div><small>Tipo</small><strong>' + escaparHtmlAlmox(item.tipo_exibicao || item.tipo) + '</strong></div>' +
+        '</div></section><section class="panel"><h2>Quantidades por lote</h2>' + renderTabelaLotes(lotesItem,gerente) +
         '</section><section class="panel"><h2>Histórico de movimentos</h2>' + renderTabelaMovimentos(movs) + '</section>';
     }
   } else {
@@ -664,21 +675,26 @@ async function renderView(env, user, url) {
   return respostaHtml(layoutAlmox(user,view,content,gerente,notice,almoxarifeExclusivo));
 }
 
+
 async function processarFormulario(request, env, user) {
   const form = await request.formData();
   const action = String(form.get("acao") || "");
   const get = (key) => String(form.get(key) ?? "").trim();
-  if (!(await podeGerenciarAlmox(env,user)) && action !== "requisitar") throw new Error("Ação restrita aos responsáveis do Almoxarifado.");
+  if (!(await podeGerenciarAlmox(env,user)) && action !== "requisitar") {
+    throw new Error("Ação restrita aos responsáveis do Almoxarifado.");
+  }
   if (action === "criar_item") {
-    await criarItem(env,user,{codigo:get("codigo"),nome:get("nome"),tipo:get("tipo"),unidade:get("unidade"),local_padrao:get("local_padrao"),quantidade_minima:get("quantidade_minima"),controla_lote:form.get("controla_lote")==="1"});
-    return "/almoxarifado?view=itens&ok=" + encodeURIComponent("Item cadastrado.");
+    await criarItem(env,user,{codigo:get("codigo"),nome:get("nome"),tipo:get("tipo"),unidade:get("unidade")});
+    return "/almoxarifado?view=itens&ok=" + encodeURIComponent("Material cadastrado.");
   }
   if (action === "receber") {
-    await receberMaterial(env,user,{item_id:get("item_id"),codigo_lote:get("codigo_lote"),validade:get("validade"),quantidade:get("quantidade"),localizacao:get("localizacao"),fornecedor:get("fornecedor"),documento_entrada:get("documento_entrada"),recebido_em:get("recebido_em"),status:get("status")});
-    return "/almoxarifado?view=entrada&ok=" + encodeURIComponent("Entrada registrada no histórico.");
+    await receberMaterial(env,user,{item_id:get("item_id"),codigo_lote:get("codigo_lote"),
+      validade:get("validade"),quantidade:get("quantidade"),fornecedor:get("fornecedor")});
+    return "/almoxarifado?view=entrada&ok=" + encodeURIComponent("Entrada registrada no estoque do Almoxarifado.");
   }
   if (action === "requisitar") {
-    await criarRequisicao(env,user,{item_id:get("item_id"),quantidade:get("quantidade"),observacao:get("observacao"),setor:get("setor")});
+    await criarRequisicao(env,user,{item_id:get("item_id"),quantidade:get("quantidade"),
+      observacao:get("observacao"),setor:get("setor")});
     return "/almoxarifado?view=requisicoes&ok=" + encodeURIComponent("Requisição enviada ao Almoxarifado.");
   }
   if (action === "atender") {
@@ -686,11 +702,13 @@ async function processarFormulario(request, env, user) {
     return "/almoxarifado?view=requisicoes&ok=" + encodeURIComponent("Saída registrada e vinculada à requisição.");
   }
   if (action === "ajustar_inventario") {
-    await ajustarInventario(env,user,{lote_id:get("lote_id"),quantidade_contada:get("quantidade_contada"),motivo:get("motivo"),referencia:"CONTAGEM FÍSICA"});
+    await ajustarInventario(env,user,{lote_id:get("lote_id"),quantidade_contada:get("quantidade_contada"),
+      motivo:get("motivo"),referencia:"CONTAGEM FÍSICA"});
     return "/almoxarifado?view=inventario&ok=" + encodeURIComponent("Contagem conferida. Diferença registrada, se existente.");
   }
   if (action === "movimento_especial") {
-    await registrarMovimentoEspecial(env,user,{lote_id:get("lote_id"),tipo:get("tipo"),quantidade:get("quantidade"),local_destino:get("local_destino"),motivo:get("motivo")});
+    await registrarMovimentoEspecial(env,user,{lote_id:get("lote_id"),tipo:get("tipo"),
+      quantidade:get("quantidade"),motivo:get("motivo")});
     return "/almoxarifado?view=movimentos&ok=" + encodeURIComponent("Movimento registrado.");
   }
   if (action === "status_lote") {
@@ -699,6 +717,7 @@ async function processarFormulario(request, env, user) {
   }
   throw new Error("Ação não reconhecida.");
 }
+
 
 async function handleApi(request, env, url, user) {
   const path = url.pathname;
