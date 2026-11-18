@@ -1,7 +1,7 @@
 import { obterUsuarioLogado, criarHashSenha } from "../core/auth.js";
 import { cabecalhosSegurancaV30, htmlResponse } from "../core/http.js";
 
-const TIPOS_ITEM = ["REAGENTE", "PADRAO", "CONSUMIVEL", "KIT", "VIDRARIA", "EPI"];
+const TIPOS_ITEM = ["RESINA", "CONSUMIVEL", "REAGENTE", "PADRAO", "KIT", "VIDRARIA", "EPI"];
 const UNIDADES = ["mL", "g", "un"];
 const STATUS_LOTE = ["DISPONIVEL", "QUARENTENA", "BLOQUEADO"];
 const SETORES_DIGITAIS = ["CAD/CAM", "FATIAMENTO", "IMPRESSAO", "ACABAMENTO"];
@@ -95,8 +95,18 @@ function redirecionar(destino) {
 
 function numeroPositivo(value, label = "Quantidade") {
   const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0 || n > 1000000000) throw new Error(label + " deve ser maior que zero.");
+  if (!Number.isSafeInteger(n) || n <= 0 || n > 1000000000) {
+    throw new Error(label + " deve ser um número inteiro maior que zero (1, 2, 3...).");
+  }
   return n;
+}
+
+function textoEstoqueAlmox(estoque) {
+  return String(estoque || "").toUpperCase() === "IMPRESSAO" ? "Impressão" : "Almoxarifado";
+}
+
+function codigoLoteExibido(lote) {
+  return lote?.codigo_lote_exibicao || lote?.codigo_lote || "—";
 }
 
 export function setoresDisponiveisAlmox(user) {
@@ -153,57 +163,60 @@ async function lerJson(request) {
 
 async function criarItem(env, user, body) {
   const tipo = String(body.tipo || "").toUpperCase();
-  const unidade = String(body.unidade || "");
+  const unidade = String(body.unidade || "un");
   if (!TIPOS_ITEM.includes(tipo)) throw new Error("Tipo de item inválido.");
   if (!UNIDADES.includes(unidade)) throw new Error("A unidade deve ser mL, g ou un.");
-  const codigo = String(body.codigo || "").trim().toUpperCase().slice(0, 40);
+
+  const codigoInformado = String(body.codigo || "").trim().toUpperCase().slice(0, 40);
+  const codigo = codigoInformado || ("AUTO-" + crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase());
   const nome = String(body.nome || "").trim().slice(0, 120);
-  const local = String(body.local_padrao || "").trim().slice(0, 100);
-  const minimo = Number(body.quantidade_minima ?? 0);
-  const controlaLote = ["REAGENTE", "PADRAO", "KIT"].includes(tipo) || Boolean(body.controla_lote);
-  if (!codigo || !nome || !local) throw new Error("Código, nome e local padrão são obrigatórios.");
-  if (!Number.isFinite(minimo) || minimo < 0) throw new Error("O estoque mínimo não pode ser negativo.");
+  if (!nome) throw new Error("Informe o nome do material.");
+
+  // O tipo escolhido fica preservado sem reconstruir a tabela legada.
+  const tipoBanco = ["RESINA", "REAGENTE", "PADRAO", "KIT"].includes(tipo) ? "CONSUMIVEL" : tipo;
   await executar(env.db,
-    "INSERT INTO almoxarifado_itens (codigo,nome,tipo,unidade,local_padrao,quantidade_minima,controla_lote,criado_por) VALUES (?,?,?,?,?,?,?,?)",
-    codigo, nome, tipo, unidade, local, minimo, controlaLote ? 1 : 0, user.id);
+    "INSERT INTO almoxarifado_itens (codigo,nome,tipo,unidade,local_padrao,quantidade_minima,controla_lote,criado_por,tipo_catalogo) VALUES (?,?,?,?, 'ALMOXARIFADO',0,0,?,?)",
+    codigo, nome, tipoBanco, unidade, user.id, tipo);
 }
+
 
 async function receberMaterial(env, user, body) {
   const itemId = Number(body.item_id);
   const quantidade = numeroPositivo(body.quantidade);
   const item = await primeiro(env.db, "SELECT * FROM almoxarifado_itens WHERE id=? AND ativo=1", itemId);
   if (!item) throw new Error("Item não encontrado ou inativo.");
+
   let codigoLote = String(body.codigo_lote || "").trim().slice(0, 80);
-  let validade = String(body.validade || "").trim() || null;
-  if (item.controla_lote) {
-    if (!codigoLote || !validade) throw new Error("Este item exige número de lote e validade.");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(validade)) throw new Error("Validade inválida.");
-  } else {
-    codigoLote = "INT-" + Date.now() + "-" + crypto.randomUUID().slice(0, 8);
-    validade = null;
-  }
-  const local = String(body.localizacao || item.local_padrao).trim().slice(0, 100);
-  const situacao = String(body.status || "DISPONIVEL").toUpperCase();
-  if (!local || !["DISPONIVEL", "QUARENTENA"].includes(situacao)) throw new Error("Local ou situação de recebimento inválidos.");
+  const validade = String(body.validade || "").trim() || null;
+  if (validade && !/^\d{4}-\d{2}-\d{2}$/.test(validade)) throw new Error("Validade inválida.");
+  if (!codigoLote) codigoLote = "INT-" + Date.now() + "-" + crypto.randomUUID().slice(0, 8);
+
+  const local = "Almoxarifado";
   const fornecedor = String(body.fornecedor || "").trim().slice(0, 120) || null;
   const documento = String(body.documento_entrada || "").trim().slice(0, 100) || null;
   const recebidoEm = String(body.recebido_em || new Date().toISOString().slice(0, 10));
-  let lote = await primeiro(env.db, "SELECT * FROM almoxarifado_lotes WHERE item_id=? AND codigo_lote=?", itemId, codigoLote);
+  let lote = await primeiro(env.db,
+    "SELECT * FROM almoxarifado_lotes WHERE item_id=? AND codigo_lote=? AND estoque='ALMOXARIFADO'",
+    itemId, codigoLote);
+
   if (lote) {
-    if ((lote.validade || null) !== validade) throw new Error("O lote já existe com outra validade. Confira o cadastro antes de receber.");
-    if (String(lote.localizacao) !== local) throw new Error("O lote já está cadastrado em outro local. Faça uma transferência registrada.");
+    if ((lote.validade || null) !== validade) {
+      throw new Error("Este lote já foi cadastrado com outra validade. Confira os dados.");
+    }
   } else {
     const result = await executar(env.db,
-      "INSERT INTO almoxarifado_lotes (item_id,codigo_lote,validade,localizacao,status,fornecedor,documento_entrada,recebido_em,criado_por) VALUES (?,?,?,?,?,?,?,?,?)",
-      itemId, codigoLote, validade, local, situacao, fornecedor, documento, recebidoEm, user.id);
+      "INSERT INTO almoxarifado_lotes (item_id,codigo_lote,validade,localizacao,status,fornecedor,documento_entrada,recebido_em,criado_por,estoque) VALUES (?,?,?,?,?,?,?,?,?,'ALMOXARIFADO')",
+      itemId, codigoLote, validade, local, "DISPONIVEL", fornecedor, documento, recebidoEm, user.id);
     const loteId = Number(result?.meta?.last_row_id || 0);
     lote = await primeiro(env.db, "SELECT * FROM almoxarifado_lotes WHERE id=?", loteId);
   }
   if (!lote) throw new Error("Não foi possível registrar o lote.");
+
   await executar(env.db,
-    "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,local_destino,motivo,usuario_id) VALUES (?,?, 'ENTRADA', ?, 'RECEBIMENTO', ?, ?, ?, ?)",
-    itemId, lote.id, quantidade, documento, local, "Recebimento de material", user.id);
+    "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,local_destino,motivo,usuario_id) VALUES (?,?, 'ENTRADA', ?, 'RECEBIMENTO', ?, 'ALMOXARIFADO', ?, ?)",
+    itemId, lote.id, quantidade, documento, "Entrada no Almoxarifado", user.id);
 }
+
 
 async function criarRequisicao(env, user, body) {
   const itemId = Number(body.item_id);
@@ -243,7 +256,9 @@ async function ajustarInventario(env, user, body) {
   const loteId = Number(body.lote_id);
   const contado = Number(body.quantidade_contada);
   const motivo = String(body.motivo || "").trim().slice(0, 300);
-  if (!Number.isFinite(contado) || contado < 0) throw new Error("A quantidade contada não pode ser negativa.");
+  if (!Number.isSafeInteger(contado) || contado < 0) {
+    throw new Error("A quantidade contada deve ser um número inteiro igual ou maior que zero.");
+  }
   if (motivo.length < 4) throw new Error("Informe o motivo do ajuste.");
   const lote = await primeiro(env.db, "SELECT s.*,l.status AS status_real FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=?", loteId);
   if (!lote) throw new Error("Lote não encontrado.");
@@ -254,34 +269,48 @@ async function ajustarInventario(env, user, body) {
     lote.item_id, loteId, diferenca > 0 ? "AJUSTE_POSITIVO" : "AJUSTE_NEGATIVO", Math.abs(diferenca), "CONTAGEM FÍSICA", motivo, user.id);
 }
 
+
 async function registrarMovimentoEspecial(env, user, body) {
   const loteId = Number(body.lote_id);
   const quantidade = numeroPositivo(body.quantidade);
   const tipo = String(body.tipo || "").toUpperCase();
   const motivo = String(body.motivo || "").trim().slice(0, 300);
   if (!["PERDA", "VENCIMENTO", "TRANSFERENCIA"].includes(tipo)) throw new Error("Tipo de movimento inválido.");
-  if (motivo.length < 4) throw new Error("Informe o motivo do movimento.");
-  const lote = await primeiro(env.db, "SELECT s.*,l.localizacao AS local_atual FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=?", loteId);
+  if (["PERDA", "VENCIMENTO"].includes(tipo) && motivo.length < 4) {
+    throw new Error("Informe o motivo da perda ou do descarte.");
+  }
+
+  const lote = await primeiro(env.db,
+    "SELECT s.*,l.localizacao AS local_atual,l.estoque AS estoque_atual FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=?",
+    loteId);
   if (!lote) throw new Error("Lote não encontrado.");
+
   if (tipo === "TRANSFERENCIA") {
-    if (lote.status_lote !== "DISPONIVEL" || (lote.validade && lote.validade < new Date().toISOString().slice(0, 10))) {
-      throw new Error("Somente lote disponível e dentro da validade pode ser transferido.");
+    if (lote.estoque_atual !== "ALMOXARIFADO") throw new Error("A transferência deve sair do estoque do Almoxarifado.");
+    if (lote.status_lote !== "DISPONIVEL" ||
+        (lote.validade && lote.validade < new Date().toISOString().slice(0, 10))) {
+      throw new Error("Somente material disponível e dentro da validade pode ser transferido.");
     }
-    if (Math.abs(quantidade - Number(lote.saldo)) > 0.000001) {
-      throw new Error("A transferência desta versão move o lote inteiro, pois cada lote possui uma única localização.");
-    }
-    const destino = String(body.local_destino || "").trim().slice(0, 100);
-    if (!destino || destino === lote.local_atual) throw new Error("Informe um local de destino diferente do atual.");
+    if (Number(lote.saldo) < quantidade) throw new Error("Saldo insuficiente no Almoxarifado.");
+
+    const codigoTransferencia = "TRF-" + loteId + "-" + crypto.randomUUID().slice(0, 8).toUpperCase();
+    const motivoTransferencia = motivo || null;
     await env.db.batch([
-      env.db.prepare("INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,local_origem,local_destino,motivo,usuario_id) VALUES (?,?, 'TRANSFERENCIA', ?, 'TRANSFERENCIA', ?, ?, ?, ?)").bind(lote.item_id, loteId, quantidade, lote.local_atual, destino, motivo, user.id),
-      env.db.prepare("UPDATE almoxarifado_lotes SET localizacao=? WHERE id=?").bind(destino, loteId)
+      env.db.prepare("INSERT OR IGNORE INTO almoxarifado_lotes (item_id,codigo_lote,validade,localizacao,status,fornecedor,documento_entrada,recebido_em,criado_por,estoque,lote_origem_id) SELECT item_id,?,validade,'Impressão',status,fornecedor,documento_entrada,date('now'),?,'IMPRESSAO',id FROM almoxarifado_lotes WHERE id=? AND estoque='ALMOXARIFADO'")
+        .bind(codigoTransferencia,user.id,loteId),
+      env.db.prepare("INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,local_origem,local_destino,motivo,usuario_id) VALUES (?,?,'SAIDA',?,'TRANSFERENCIA',?,'ALMOXARIFADO','IMPRESSAO',?,?)")
+        .bind(lote.item_id,loteId,quantidade,codigoTransferencia,motivoTransferencia,user.id),
+      env.db.prepare("INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,local_origem,local_destino,motivo,usuario_id) SELECT item_id,id,'ENTRADA',?,'TRANSFERENCIA_RECEBIDA',?,'ALMOXARIFADO','IMPRESSAO',?,? FROM almoxarifado_lotes WHERE item_id=? AND lote_origem_id=? AND estoque='IMPRESSAO'")
+        .bind(quantidade,codigoTransferencia,motivoTransferencia,user.id,lote.item_id,loteId)
     ]);
     return;
   }
+
   await executar(env.db,
     "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,motivo,usuario_id) VALUES (?,?,?,?,'OPERACAO',?,?)",
     lote.item_id, loteId, tipo, quantidade, motivo, user.id);
 }
+
 
 async function alterarStatusLote(env, body) {
   const loteId = Number(body.lote_id);
