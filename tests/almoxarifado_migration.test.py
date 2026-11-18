@@ -9,6 +9,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 MIGRATION = ROOT / "worker" / "migrations" / "0002_v5100_almoxarifado.sql"
 CHAT_MIGRATION = ROOT / "worker" / "migrations" / "0003_v5120_almoxarifado_chat.sql"
 REMOVE_CHAT_MIGRATION = ROOT / "worker" / "migrations" / "0004_v5130_remove_almoxarifado_chat.sql"
+STOCK_MIGRATION = ROOT / "worker" / "migrations" / "0005_v5140_estoque_impressao.sql"
 
 
 class AlmoxarifadoMigrationTests(unittest.TestCase):
@@ -25,6 +26,7 @@ class AlmoxarifadoMigrationTests(unittest.TestCase):
         self.db.executescript(MIGRATION.read_text(encoding="utf-8"))
         self.db.executescript(CHAT_MIGRATION.read_text(encoding="utf-8"))
         self.db.executescript(REMOVE_CHAT_MIGRATION.read_text(encoding="utf-8"))
+        self.db.executescript(STOCK_MIGRATION.read_text(encoding="utf-8"))
 
     def tearDown(self):
         self.db.close()
@@ -75,6 +77,63 @@ class AlmoxarifadoMigrationTests(unittest.TestCase):
             "almoxarifado_status_requisicoes",
         }.issubset(names))
 
+
+
+    def test_v5140_adds_two_stock_locations_and_optional_expiry(self):
+        columns_items = {row[1] for row in self.db.execute("PRAGMA table_info(almoxarifado_itens)")}
+        columns_lotes = {row[1] for row in self.db.execute("PRAGMA table_info(almoxarifado_lotes)")}
+        self.assertIn("tipo_catalogo", columns_items)
+        self.assertIn("estoque", columns_lotes)
+        self.assertIn("lote_origem_id", columns_lotes)
+
+        item_id = self.item("RES-01", "Resina de teste")
+        self.db.execute(
+            "UPDATE almoxarifado_itens SET tipo_catalogo='RESINA' WHERE id=?", (item_id,)
+        )
+        lot_id = self.lote(item_id, "LOTE-SEM-VALIDADE", validade=None)
+        stock, = self.db.execute(
+            "SELECT estoque FROM almoxarifado_lotes WHERE id=?", (lot_id,)
+        ).fetchone()
+        self.assertEqual(stock, "ALMOXARIFADO")
+        self.assertEqual(
+            self.db.execute(
+                "SELECT tipo_catalogo FROM almoxarifado_itens WHERE id=?", (item_id,)
+            ).fetchone()[0],
+            "RESINA",
+        )
+
+    def test_partial_transfer_splits_six_units_between_warehouse_and_print_stock(self):
+        item_id = self.item("RES-02", "Resina para impressão")
+        source_lot = self.lote(item_id, "LOTE-BASE")
+        self.movimento(item_id, source_lot, "ENTRADA", 6)
+
+        cursor = self.db.execute(
+            """INSERT INTO almoxarifado_lotes
+               (item_id,codigo_lote,validade,localizacao,status,criado_por,estoque,lote_origem_id)
+               VALUES (?,?,?,?,?,1,'IMPRESSAO',?)""",
+            (item_id, "TRF-TESTE", "2099-12-31", "Impressão", "DISPONIVEL", source_lot),
+        )
+        print_lot = cursor.lastrowid
+        self.movimento(item_id, source_lot, "SAIDA", 1,
+                       origem_tipo="TRANSFERENCIA", origem_id="TRF-TESTE")
+        self.movimento(item_id, print_lot, "ENTRADA", 1,
+                       origem_tipo="TRANSFERENCIA_RECEBIDA", origem_id="TRF-TESTE")
+
+        saldos = dict(self.db.execute(
+            """SELECT l.estoque,
+               SUM(CASE
+                 WHEN m.tipo IN ('ENTRADA','AJUSTE_POSITIVO') THEN m.quantidade
+                 WHEN m.tipo IN ('SAIDA','PERDA','VENCIMENTO','AJUSTE_NEGATIVO') THEN -m.quantidade
+                 ELSE 0 END)
+               FROM almoxarifado_lotes l
+               JOIN almoxarifado_movimentos m ON m.lote_id=l.id
+               WHERE l.item_id=?
+               GROUP BY l.estoque""",
+            (item_id,),
+        ))
+        self.assertEqual(saldos["ALMOXARIFADO"], 5)
+        self.assertEqual(saldos["IMPRESSAO"], 1)
+        self.assertEqual(sum(saldos.values()), 6)
 
     def test_general_chat_table_is_preserved_and_the_unused_almox_chat_is_removed(self):
         names = {row[0] for row in self.db.execute(
