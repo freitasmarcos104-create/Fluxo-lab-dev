@@ -1,7 +1,7 @@
 import { obterUsuarioLogado, criarHashSenha } from "../core/auth.js";
 import { cabecalhosSegurancaV30, htmlResponse } from "../core/http.js";
 
-const TIPOS_ITEM = ["REAGENTE", "PADRAO", "CONSUMIVEL", "KIT", "VIDRARIA", "EPI"];
+const TIPOS_ITEM = ["RESINA", "CONSUMIVEL", "REAGENTE", "PADRAO", "KIT", "VIDRARIA", "EPI"];
 const UNIDADES = ["mL", "g", "un"];
 const STATUS_LOTE = ["DISPONIVEL", "QUARENTENA", "BLOQUEADO"];
 const SETORES_DIGITAIS = ["CAD/CAM", "FATIAMENTO", "IMPRESSAO", "ACABAMENTO"];
@@ -95,8 +95,18 @@ function redirecionar(destino) {
 
 function numeroPositivo(value, label = "Quantidade") {
   const n = Number(value);
-  if (!Number.isFinite(n) || n <= 0 || n > 1000000000) throw new Error(label + " deve ser maior que zero.");
+  if (!Number.isSafeInteger(n) || n <= 0 || n > 1000000000) {
+    throw new Error(label + " deve ser um número inteiro maior que zero (1, 2, 3...).");
+  }
   return n;
+}
+
+function textoEstoqueAlmox(estoque) {
+  return String(estoque || "").toUpperCase() === "IMPRESSAO" ? "Impressão" : "Almoxarifado";
+}
+
+function codigoLoteExibido(lote) {
+  return lote?.codigo_lote_exibicao || lote?.codigo_lote || "—";
 }
 
 export function setoresDisponiveisAlmox(user) {
@@ -153,57 +163,60 @@ async function lerJson(request) {
 
 async function criarItem(env, user, body) {
   const tipo = String(body.tipo || "").toUpperCase();
-  const unidade = String(body.unidade || "");
+  const unidade = String(body.unidade || "un");
   if (!TIPOS_ITEM.includes(tipo)) throw new Error("Tipo de item inválido.");
   if (!UNIDADES.includes(unidade)) throw new Error("A unidade deve ser mL, g ou un.");
-  const codigo = String(body.codigo || "").trim().toUpperCase().slice(0, 40);
+
+  const codigoInformado = String(body.codigo || "").trim().toUpperCase().slice(0, 40);
+  const codigo = codigoInformado || ("AUTO-" + crypto.randomUUID().replaceAll("-", "").slice(0, 12).toUpperCase());
   const nome = String(body.nome || "").trim().slice(0, 120);
-  const local = String(body.local_padrao || "").trim().slice(0, 100);
-  const minimo = Number(body.quantidade_minima ?? 0);
-  const controlaLote = ["REAGENTE", "PADRAO", "KIT"].includes(tipo) || Boolean(body.controla_lote);
-  if (!codigo || !nome || !local) throw new Error("Código, nome e local padrão são obrigatórios.");
-  if (!Number.isFinite(minimo) || minimo < 0) throw new Error("O estoque mínimo não pode ser negativo.");
+  if (!nome) throw new Error("Informe o nome do material.");
+
+  // O tipo escolhido fica preservado sem reconstruir a tabela legada.
+  const tipoBanco = ["RESINA", "REAGENTE", "PADRAO", "KIT"].includes(tipo) ? "CONSUMIVEL" : tipo;
   await executar(env.db,
-    "INSERT INTO almoxarifado_itens (codigo,nome,tipo,unidade,local_padrao,quantidade_minima,controla_lote,criado_por) VALUES (?,?,?,?,?,?,?,?)",
-    codigo, nome, tipo, unidade, local, minimo, controlaLote ? 1 : 0, user.id);
+    "INSERT INTO almoxarifado_itens (codigo,nome,tipo,unidade,local_padrao,quantidade_minima,controla_lote,criado_por,tipo_catalogo) VALUES (?,?,?,?, 'ALMOXARIFADO',0,0,?,?)",
+    codigo, nome, tipoBanco, unidade, user.id, tipo);
 }
+
 
 async function receberMaterial(env, user, body) {
   const itemId = Number(body.item_id);
   const quantidade = numeroPositivo(body.quantidade);
   const item = await primeiro(env.db, "SELECT * FROM almoxarifado_itens WHERE id=? AND ativo=1", itemId);
   if (!item) throw new Error("Item não encontrado ou inativo.");
+
   let codigoLote = String(body.codigo_lote || "").trim().slice(0, 80);
-  let validade = String(body.validade || "").trim() || null;
-  if (item.controla_lote) {
-    if (!codigoLote || !validade) throw new Error("Este item exige número de lote e validade.");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(validade)) throw new Error("Validade inválida.");
-  } else {
-    codigoLote = "INT-" + Date.now() + "-" + crypto.randomUUID().slice(0, 8);
-    validade = null;
-  }
-  const local = String(body.localizacao || item.local_padrao).trim().slice(0, 100);
-  const situacao = String(body.status || "DISPONIVEL").toUpperCase();
-  if (!local || !["DISPONIVEL", "QUARENTENA"].includes(situacao)) throw new Error("Local ou situação de recebimento inválidos.");
+  const validade = String(body.validade || "").trim() || null;
+  if (validade && !/^\d{4}-\d{2}-\d{2}$/.test(validade)) throw new Error("Validade inválida.");
+  if (!codigoLote) codigoLote = "INT-" + Date.now() + "-" + crypto.randomUUID().slice(0, 8);
+
+  const local = "Almoxarifado";
   const fornecedor = String(body.fornecedor || "").trim().slice(0, 120) || null;
   const documento = String(body.documento_entrada || "").trim().slice(0, 100) || null;
   const recebidoEm = String(body.recebido_em || new Date().toISOString().slice(0, 10));
-  let lote = await primeiro(env.db, "SELECT * FROM almoxarifado_lotes WHERE item_id=? AND codigo_lote=?", itemId, codigoLote);
+  let lote = await primeiro(env.db,
+    "SELECT * FROM almoxarifado_lotes WHERE item_id=? AND codigo_lote=? AND estoque='ALMOXARIFADO'",
+    itemId, codigoLote);
+
   if (lote) {
-    if ((lote.validade || null) !== validade) throw new Error("O lote já existe com outra validade. Confira o cadastro antes de receber.");
-    if (String(lote.localizacao) !== local) throw new Error("O lote já está cadastrado em outro local. Faça uma transferência registrada.");
+    if ((lote.validade || null) !== validade) {
+      throw new Error("Este lote já foi cadastrado com outra validade. Confira os dados.");
+    }
   } else {
     const result = await executar(env.db,
-      "INSERT INTO almoxarifado_lotes (item_id,codigo_lote,validade,localizacao,status,fornecedor,documento_entrada,recebido_em,criado_por) VALUES (?,?,?,?,?,?,?,?,?)",
-      itemId, codigoLote, validade, local, situacao, fornecedor, documento, recebidoEm, user.id);
+      "INSERT INTO almoxarifado_lotes (item_id,codigo_lote,validade,localizacao,status,fornecedor,documento_entrada,recebido_em,criado_por,estoque) VALUES (?,?,?,?,?,?,?,?,?,'ALMOXARIFADO')",
+      itemId, codigoLote, validade, local, "DISPONIVEL", fornecedor, documento, recebidoEm, user.id);
     const loteId = Number(result?.meta?.last_row_id || 0);
     lote = await primeiro(env.db, "SELECT * FROM almoxarifado_lotes WHERE id=?", loteId);
   }
   if (!lote) throw new Error("Não foi possível registrar o lote.");
+
   await executar(env.db,
-    "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,local_destino,motivo,usuario_id) VALUES (?,?, 'ENTRADA', ?, 'RECEBIMENTO', ?, ?, ?, ?)",
-    itemId, lote.id, quantidade, documento, local, "Recebimento de material", user.id);
+    "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,local_destino,motivo,usuario_id) VALUES (?,?, 'ENTRADA', ?, 'RECEBIMENTO', ?, 'ALMOXARIFADO', ?, ?)",
+    itemId, lote.id, quantidade, documento, "Entrada no Almoxarifado", user.id);
 }
+
 
 async function criarRequisicao(env, user, body) {
   const itemId = Number(body.item_id);
@@ -227,23 +240,39 @@ async function atenderRequisicao(env, user, body) {
   const loteId = Number(body.lote_id);
   const quantidade = numeroPositivo(body.quantidade);
   const linha = await primeiro(env.db,
-    "SELECT ri.*,r.id AS requisicao_id,r.status AS status_manual FROM almoxarifado_requisicao_itens ri JOIN almoxarifado_requisicoes r ON r.id=ri.requisicao_id WHERE ri.id=?",
+    "SELECT ri.*,r.id AS requisicao_id,r.status AS status_manual,r.setor FROM almoxarifado_requisicao_itens ri JOIN almoxarifado_requisicoes r ON r.id=ri.requisicao_id WHERE ri.id=?",
     lineId);
-  if (!linha || linha.status_manual === "CANCELADA") throw new Error("Requisição não encontrada ou cancelada.");
+  if (!linha || linha.status_manual === "CANCELADA") {
+    throw new Error("Requisição não encontrada ou cancelada.");
+  }
   const lote = await primeiro(env.db,
-    "SELECT s.*,l.status AS status_real,l.validade AS validade_real FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=? AND s.item_id=? AND s.saldo>0",
+    "SELECT s.*,l.status AS status_real,l.validade AS validade_real,l.estoque FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=? AND s.item_id=? AND s.saldo>0 AND l.estoque='ALMOXARIFADO'",
     loteId, linha.item_id);
-  if (!lote) throw new Error("Lote não encontrado ou sem saldo disponível.");
+  if (!lote) throw new Error("Lote não encontrado no Almoxarifado ou sem saldo disponível.");
+
+  if (String(linha.setor || "").toUpperCase() === "DIGITAL:IMPRESSAO") {
+    await registrarMovimentoEspecial(env,user,{
+      lote_id:loteId,quantidade,tipo:"TRANSFERENCIA",
+      motivo:"Atendimento da requisição #" + linha.requisicao_id,
+      requisicao_item_id:lineId
+    });
+    return;
+  }
+
   await executar(env.db,
     "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,requisicao_item_id,motivo,usuario_id) VALUES (?,?, 'SAIDA', ?, 'REQUISICAO', ?, ?, ?, ?)",
-    linha.item_id, loteId, quantidade, linha.requisicao_id, lineId, "Atendimento da requisição #" + linha.requisicao_id, user.id);
+    linha.item_id, loteId, quantidade, linha.requisicao_id, lineId,
+    "Atendimento da requisição #" + linha.requisicao_id, user.id);
 }
+
 
 async function ajustarInventario(env, user, body) {
   const loteId = Number(body.lote_id);
   const contado = Number(body.quantidade_contada);
   const motivo = String(body.motivo || "").trim().slice(0, 300);
-  if (!Number.isFinite(contado) || contado < 0) throw new Error("A quantidade contada não pode ser negativa.");
+  if (!Number.isSafeInteger(contado) || contado < 0) {
+    throw new Error("A quantidade contada deve ser um número inteiro igual ou maior que zero.");
+  }
   if (motivo.length < 4) throw new Error("Informe o motivo do ajuste.");
   const lote = await primeiro(env.db, "SELECT s.*,l.status AS status_real FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=?", loteId);
   if (!lote) throw new Error("Lote não encontrado.");
@@ -254,34 +283,49 @@ async function ajustarInventario(env, user, body) {
     lote.item_id, loteId, diferenca > 0 ? "AJUSTE_POSITIVO" : "AJUSTE_NEGATIVO", Math.abs(diferenca), "CONTAGEM FÍSICA", motivo, user.id);
 }
 
+
 async function registrarMovimentoEspecial(env, user, body) {
   const loteId = Number(body.lote_id);
   const quantidade = numeroPositivo(body.quantidade);
   const tipo = String(body.tipo || "").toUpperCase();
   const motivo = String(body.motivo || "").trim().slice(0, 300);
+  const requisicaoItemId = Number(body.requisicao_item_id) || null;
   if (!["PERDA", "VENCIMENTO", "TRANSFERENCIA"].includes(tipo)) throw new Error("Tipo de movimento inválido.");
-  if (motivo.length < 4) throw new Error("Informe o motivo do movimento.");
-  const lote = await primeiro(env.db, "SELECT s.*,l.localizacao AS local_atual FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=?", loteId);
+  if (["PERDA", "VENCIMENTO"].includes(tipo) && motivo.length < 4) {
+    throw new Error("Informe o motivo da perda ou do descarte.");
+  }
+
+  const lote = await primeiro(env.db,
+    "SELECT s.*,l.localizacao AS local_atual,l.estoque AS estoque_atual FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=?",
+    loteId);
   if (!lote) throw new Error("Lote não encontrado.");
+
   if (tipo === "TRANSFERENCIA") {
-    if (lote.status_lote !== "DISPONIVEL" || (lote.validade && lote.validade < new Date().toISOString().slice(0, 10))) {
-      throw new Error("Somente lote disponível e dentro da validade pode ser transferido.");
+    if (lote.estoque_atual !== "ALMOXARIFADO") throw new Error("A transferência deve sair do estoque do Almoxarifado.");
+    if (lote.status_lote !== "DISPONIVEL" ||
+        (lote.validade && lote.validade < new Date().toISOString().slice(0, 10))) {
+      throw new Error("Somente material disponível e dentro da validade pode ser transferido.");
     }
-    if (Math.abs(quantidade - Number(lote.saldo)) > 0.000001) {
-      throw new Error("A transferência desta versão move o lote inteiro, pois cada lote possui uma única localização.");
-    }
-    const destino = String(body.local_destino || "").trim().slice(0, 100);
-    if (!destino || destino === lote.local_atual) throw new Error("Informe um local de destino diferente do atual.");
+    if (Number(lote.saldo) < quantidade) throw new Error("Saldo insuficiente no Almoxarifado.");
+
+    const codigoTransferencia = "TRF-" + loteId + "-" + crypto.randomUUID().slice(0, 8).toUpperCase();
+    const motivoTransferencia = motivo || null;
     await env.db.batch([
-      env.db.prepare("INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,local_origem,local_destino,motivo,usuario_id) VALUES (?,?, 'TRANSFERENCIA', ?, 'TRANSFERENCIA', ?, ?, ?, ?)").bind(lote.item_id, loteId, quantidade, lote.local_atual, destino, motivo, user.id),
-      env.db.prepare("UPDATE almoxarifado_lotes SET localizacao=? WHERE id=?").bind(destino, loteId)
+      env.db.prepare("INSERT OR IGNORE INTO almoxarifado_lotes (item_id,codigo_lote,validade,localizacao,status,fornecedor,documento_entrada,recebido_em,criado_por,estoque,lote_origem_id) SELECT item_id,?,validade,'Impressão',status,fornecedor,documento_entrada,date('now'),?,'IMPRESSAO',id FROM almoxarifado_lotes WHERE id=? AND estoque='ALMOXARIFADO'")
+        .bind(codigoTransferencia,user.id,loteId),
+      env.db.prepare("INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,requisicao_item_id,local_origem,local_destino,motivo,usuario_id) VALUES (?,?,'SAIDA',?,'TRANSFERENCIA',?,?, 'ALMOXARIFADO','IMPRESSAO',?,?)")
+        .bind(lote.item_id,loteId,quantidade,codigoTransferencia,requisicaoItemId,motivoTransferencia,user.id),
+      env.db.prepare("INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,local_origem,local_destino,motivo,usuario_id) SELECT item_id,id,'ENTRADA',?,'TRANSFERENCIA_RECEBIDA',?,'ALMOXARIFADO','IMPRESSAO',?,? FROM almoxarifado_lotes WHERE item_id=? AND lote_origem_id=? AND estoque='IMPRESSAO'")
+        .bind(quantidade,codigoTransferencia,motivoTransferencia,user.id,lote.item_id,loteId)
     ]);
     return;
   }
+
   await executar(env.db,
     "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,motivo,usuario_id) VALUES (?,?,?,?,'OPERACAO',?,?)",
     lote.item_id, loteId, tipo, quantidade, motivo, user.id);
 }
+
 
 async function alterarStatusLote(env, body) {
   const loteId = Number(body.lote_id);
@@ -298,17 +342,36 @@ async function alterarStatusLote(env, body) {
 async function dadosItens(env, busca = "") {
   const termo = String(busca || "").trim().toLowerCase();
   return todos(env.db,
-    "SELECT i.*,COALESCE(SUM(s.saldo),0) AS saldo_total,COALESCE(SUM(CASE WHEN s.status_lote='DISPONIVEL' AND (s.validade IS NULL OR s.validade>=date('now')) THEN s.saldo ELSE 0 END),0) AS saldo_disponivel FROM almoxarifado_itens i LEFT JOIN almoxarifado_saldos_lotes s ON s.item_id=i.id WHERE i.ativo=1 AND (?='' OR lower(i.codigo) LIKE ? OR lower(i.nome) LIKE ?) GROUP BY i.id ORDER BY i.nome COLLATE NOCASE",
+    "SELECT i.*,COALESCE(i.tipo_catalogo,i.tipo) AS tipo_exibicao," +
+    "COALESCE(SUM(s.saldo),0) AS saldo_total," +
+    "COALESCE(SUM(CASE WHEN l.estoque='ALMOXARIFADO' THEN s.saldo ELSE 0 END),0) AS saldo_almoxarifado," +
+    "COALESCE(SUM(CASE WHEN l.estoque='IMPRESSAO' THEN s.saldo ELSE 0 END),0) AS saldo_impressao," +
+    "COALESCE(SUM(CASE WHEN l.estoque='ALMOXARIFADO' AND l.status='DISPONIVEL' AND (l.validade IS NULL OR l.validade>=date('now')) THEN s.saldo ELSE 0 END),0) AS saldo_almoxarifado_disponivel," +
+    "COALESCE(SUM(CASE WHEN l.estoque='IMPRESSAO' AND l.status='DISPONIVEL' AND (l.validade IS NULL OR l.validade>=date('now')) THEN s.saldo ELSE 0 END),0) AS saldo_impressao_disponivel " +
+    "FROM almoxarifado_itens i LEFT JOIN almoxarifado_saldos_lotes s ON s.item_id=i.id " +
+    "LEFT JOIN almoxarifado_lotes l ON l.id=s.lote_id " +
+    "WHERE i.ativo=1 AND (?='' OR lower(i.codigo) LIKE ? OR lower(i.nome) LIKE ?) " +
+    "GROUP BY i.id ORDER BY i.nome COLLATE NOCASE",
     termo, "%" + termo + "%", "%" + termo + "%");
 }
+
 
 async function dadosLotes(env, itemId = 0) {
   const filtro = Number(itemId) > 0 ? " AND s.item_id=?" : "";
   const params = Number(itemId) > 0 ? [Number(itemId)] : [];
   return todos(env.db,
-    "SELECT s.*,i.codigo,i.nome,i.unidade,i.controla_lote,CASE WHEN s.status_lote='BLOQUEADO' THEN 'BLOQUEADO' WHEN s.status_lote='QUARENTENA' THEN 'QUARENTENA' WHEN s.status_lote='VENCIDO' THEN 'VENCIDO' WHEN s.validade IS NOT NULL AND s.validade<date('now') THEN 'VENCIDO' ELSE 'DISPONIVEL' END AS status_exibicao FROM almoxarifado_saldos_lotes s JOIN almoxarifado_itens i ON i.id=s.item_id WHERE 1=1" + filtro + " ORDER BY CASE WHEN s.validade IS NULL THEN 1 ELSE 0 END,s.validade ASC,s.recebido_em ASC,s.lote_id ASC",
+    "SELECT s.*,i.codigo,i.nome,i.unidade,COALESCE(i.tipo_catalogo,i.tipo) AS tipo_exibicao," +
+    "i.controla_lote,l.estoque,l.lote_origem_id,COALESCE(p.codigo_lote,l.codigo_lote) AS codigo_lote_exibicao," +
+    "CASE WHEN l.status='BLOQUEADO' THEN 'BLOQUEADO' WHEN l.status='QUARENTENA' THEN 'QUARENTENA' " +
+    "WHEN l.status='VENCIDO' THEN 'VENCIDO' WHEN l.validade IS NOT NULL AND l.validade<date('now') THEN 'VENCIDO' " +
+    "ELSE 'DISPONIVEL' END AS status_exibicao " +
+    "FROM almoxarifado_saldos_lotes s JOIN almoxarifado_itens i ON i.id=s.item_id " +
+    "JOIN almoxarifado_lotes l ON l.id=s.lote_id LEFT JOIN almoxarifado_lotes p ON p.id=l.lote_origem_id " +
+    "WHERE 1=1" + filtro +
+    " ORDER BY CASE WHEN s.validade IS NULL THEN 1 ELSE 0 END,s.validade ASC,s.recebido_em ASC,s.lote_id ASC",
     ...params);
 }
+
 
 async function dadosRequisicoes(env, solicitante = null) {
   const filtro = solicitante ? " WHERE r.solicitante_id=?" : "";
@@ -320,13 +383,18 @@ async function dadosRequisicoes(env, solicitante = null) {
 
 async function dadosMovimentos(env) {
   return todos(env.db,
-    "SELECT m.*,i.codigo,i.nome AS item_nome,i.unidade,l.codigo_lote,u.nome AS usuario_nome FROM almoxarifado_movimentos m JOIN almoxarifado_itens i ON i.id=m.item_id JOIN almoxarifado_lotes l ON l.id=m.lote_id LEFT JOIN usuarios u ON u.id=m.usuario_id ORDER BY m.id DESC LIMIT 200");
+    "SELECT m.*,i.codigo,i.nome AS item_nome,i.unidade,COALESCE(p.codigo_lote,l.codigo_lote) AS codigo_lote," +
+    "u.nome AS usuario_nome FROM almoxarifado_movimentos m " +
+    "JOIN almoxarifado_itens i ON i.id=m.item_id JOIN almoxarifado_lotes l ON l.id=m.lote_id " +
+    "LEFT JOIN almoxarifado_lotes p ON p.id=l.lote_origem_id " +
+    "LEFT JOIN usuarios u ON u.id=m.usuario_id ORDER BY m.id DESC LIMIT 200");
 }
+
 
 async function dadosPainel(env) {
   const results = await Promise.all([
     primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_itens WHERE ativo=1"),
-    primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_saldos_itens WHERE saldo_disponivel<quantidade_minima"),
+    primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_itens i WHERE i.ativo=1 AND NOT EXISTS (SELECT 1 FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.item_id=i.id AND l.estoque='ALMOXARIFADO' AND l.status='DISPONIVEL' AND (l.validade IS NULL OR l.validade>=date('now')) AND s.saldo>0)"),
     primeiro(env.db, "SELECT COUNT(*) AS total FROM almoxarifado_status_requisicoes WHERE status IN ('ABERTA','PARCIAL')"),
     dadosLotes(env)
   ]);
@@ -335,15 +403,17 @@ async function dadosPainel(env) {
     const limite = new Date();
     limite.setDate(limite.getDate() + dias);
     const ate = limite.toISOString().slice(0, 10);
-    return results[3].filter((l) => Number(l.saldo) > 0 && l.validade && l.validade >= hoje && l.validade <= ate && l.status_exibicao === "DISPONIVEL").length;
+    return results[3].filter((l) => Number(l.saldo) > 0 && l.validade &&
+      l.validade >= hoje && l.validade <= ate && l.status_exibicao === "DISPONIVEL").length;
   };
   return {
     itens: Number(results[0]?.total || 0),
-    abaixo_minimo: Number(results[1]?.total || 0),
+    sem_estoque: Number(results[1]?.total || 0),
     requisicoes_abertas: Number(results[2]?.total || 0),
     vencendo_30: expira(30), vencendo_60: expira(60), vencendo_90: expira(90)
   };
 }
+
 
 function classeStatus(value) {
   const v = String(value || "").toUpperCase();
@@ -353,38 +423,43 @@ function classeStatus(value) {
 }
 
 function selItens(itens) {
-  return '<option value="">Selecione um item</option>' + itens.map((item) =>
-    '<option value="' + item.id + '">' + escaparHtmlAlmox(item.codigo + " · " + item.nome + " (" + item.unidade + ")") + "</option>"
+  return '<option value="">Selecione um material</option>' + itens.map((item) =>
+    '<option value="' + item.id + '">' + escaparHtmlAlmox(item.nome + " (" + item.unidade + ")") + "</option>"
   ).join("");
 }
 
+
 function renderTabelaItens(itens, gerente = true) {
-  if (!itens.length) return '<p class="vazio">Nenhum item cadastrado.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Código</th><th>Item</th><th>Tipo</th><th>Disponível</th><th>Total físico</th><th>Mínimo</th><th>Controle</th><th>Situação</th></tr></thead><tbody>' +
+  if (!itens.length) return '<p class="vazio">Nenhum material cadastrado.</p>';
+  return '<div class="tabela-wrap"><table><thead><tr><th>Código</th><th>Material</th><th>Tipo</th><th>Almoxarifado</th><th>Impressão</th><th>Total</th><th>Situação</th></tr></thead><tbody>' +
     itens.map((item) => {
-      const saldo = Number(item.saldo_disponivel || 0);
+      const almox = Number(item.saldo_almoxarifado || 0);
+      const impressao = Number(item.saldo_impressao || 0);
       const total = Number(item.saldo_total || 0);
-      const minimo = Number(item.quantidade_minima || 0);
-      const status = saldo <= 0 ? "SEM ESTOQUE DISPONÍVEL" : saldo < minimo ? "ABAIXO DO MÍNIMO" : "NORMAL";
+      const status = almox > 0 ? "NO ALMOXARIFADO" : impressao > 0 ? "SOMENTE IMPRESSÃO" : "SEM ESTOQUE";
       const nome = gerente
         ? '<a href="/almoxarifado?view=item&id=' + item.id + '">' + escaparHtmlAlmox(item.nome) + '</a>'
         : '<strong>' + escaparHtmlAlmox(item.nome) + '</strong>';
-      return '<tr><td>' + escaparHtmlAlmox(item.codigo) + '</td><td>' + nome +
-        '</td><td>' + escaparHtmlAlmox(item.tipo) + '</td><td class="numero">' + saldo + " " + escaparHtmlAlmox(item.unidade) +
-        '</td><td class="numero">' + total + " " + escaparHtmlAlmox(item.unidade) + '</td><td class="numero">' + minimo +
-        '</td><td>' + (item.controla_lote ? "Lote e validade" : "Lote interno") +
+      const codigo = String(item.codigo || "").startsWith("AUTO-") ? "—" : (item.codigo || "—");
+      return '<tr><td>' + escaparHtmlAlmox(codigo) + '</td><td>' + nome +
+        '</td><td>' + escaparHtmlAlmox(item.tipo_exibicao || item.tipo) +
+        '</td><td class="numero">' + almox + " " + escaparHtmlAlmox(item.unidade) +
+        '</td><td class="numero">' + impressao + " " + escaparHtmlAlmox(item.unidade) +
+        '</td><td class="numero">' + total + " " + escaparHtmlAlmox(item.unidade) +
         '</td><td><span class="status ' + classeStatus(status) + '">' + status + "</span></td></tr>";
     }).join("") + "</tbody></table></div>";
 }
 
+
 function renderTabelaLotes(lotes, gerente) {
   if (!lotes.length) return '<p class="vazio">Nenhum lote registrado.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Item</th><th>Lote</th><th>Validade</th><th>Local</th><th>Saldo</th><th>Situação</th>' +
+  return '<div class="tabela-wrap"><table><thead><tr><th>Material</th><th>Lote</th><th>Validade</th><th>Estoque</th><th>Saldo</th><th>Situação</th>' +
     (gerente ? "<th>Controle</th>" : "") + '</tr></thead><tbody>' +
-    lotes.map((l) => '<tr><td>' + escaparHtmlAlmox(l.codigo + " · " + l.nome) + '</td><td>' +
-      escaparHtmlAlmox(l.codigo_lote + (l.controla_lote ? "" : " · interno")) + '</td><td>' + escaparHtmlAlmox(l.validade || "—") +
-      '</td><td>' + escaparHtmlAlmox(l.localizacao) + '</td><td class="numero">' + Number(l.saldo || 0) + " " +
-      escaparHtmlAlmox(l.unidade) + '</td><td><span class="status ' + classeStatus(l.status_exibicao) + '">' + escaparHtmlAlmox(l.status_exibicao) +
+    lotes.map((l) => '<tr><td>' + escaparHtmlAlmox(l.nome) + '</td><td>' +
+      escaparHtmlAlmox(codigoLoteExibido(l) + (l.lote_origem_id ? " · transferido" : "")) + '</td><td>' +
+      escaparHtmlAlmox(l.validade || "—") + '</td><td>' + textoEstoqueAlmox(l.estoque) +
+      '</td><td class="numero">' + Number(l.saldo || 0) + " " + escaparHtmlAlmox(l.unidade) +
+      '</td><td><span class="status ' + classeStatus(l.status_exibicao) + '">' + escaparHtmlAlmox(l.status_exibicao) +
       "</span></td>" + (gerente ? '<td><form class="linha-form" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="status_lote">' +
       '<input type="hidden" name="lote_id" value="' + l.lote_id + '"><select name="status" required><option value="">Alterar situação...</option><option value="DISPONIVEL">Disponível</option>' +
       '<option value="QUARENTENA">Quarentena</option><option value="BLOQUEADO">Bloqueado</option></select><button class="secundario">Salvar</button></form></td>' : "") +
@@ -392,60 +467,69 @@ function renderTabelaLotes(lotes, gerente) {
     ).join("") + "</tbody></table></div>";
 }
 
+
 function renderTabelaMovimentos(movimentos) {
   if (!movimentos.length) return '<p class="vazio">Ainda não existem movimentos.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Data</th><th>Item</th><th>Lote</th><th>Movimento</th><th>Quantidade</th><th>Origem</th><th>Local</th><th>Usuário</th><th>Motivo</th></tr></thead><tbody>' +
-    movimentos.map((m) => '<tr><td>' + escaparHtmlAlmox(m.criado_em) + '</td><td>' + escaparHtmlAlmox(m.codigo + " · " + m.item_nome) +
-      '</td><td>' + escaparHtmlAlmox(m.codigo_lote) + '</td><td>' + escaparHtmlAlmox(m.tipo) + '</td><td class="numero">' +
-      Number(m.quantidade) + " " + escaparHtmlAlmox(m.unidade) + '</td><td>' + escaparHtmlAlmox(m.origem_tipo || "—") +
-      '</td><td>' + escaparHtmlAlmox([m.local_origem,m.local_destino].filter(Boolean).join(" → ") || "—") +
-      '</td><td>' + escaparHtmlAlmox(m.usuario_nome || "—") + '</td><td>' + escaparHtmlAlmox(m.motivo || "—") + "</td></tr>"
-    ).join("") + "</tbody></table></div>";
+  return '<div class="tabela-wrap"><table><thead><tr><th>Data</th><th>Material</th><th>Movimento</th><th>Quantidade</th><th>Estoque</th><th>Usuário</th><th>Observação</th></tr></thead><tbody>' +
+    movimentos.map((m) => {
+      const transferencia = ["TRANSFERENCIA","TRANSFERENCIA_RECEBIDA"].includes(m.origem_tipo);
+      const tipo = m.origem_tipo === "TRANSFERENCIA" ? "SAÍDA PARA IMPRESSÃO" :
+        m.origem_tipo === "TRANSFERENCIA_RECEBIDA" ? "ENTRADA NA IMPRESSÃO" : m.tipo;
+      const estoque = m.origem_tipo === "TRANSFERENCIA" ? "Almoxarifado → Impressão" :
+        m.origem_tipo === "TRANSFERENCIA_RECEBIDA" || m.origem_tipo === "CONSUMO_IMPRESSAO" ? "Impressão" : "Almoxarifado";
+      return '<tr><td>' + escaparHtmlAlmox(m.criado_em) + '</td><td>' +
+        escaparHtmlAlmox(m.item_nome + " · " + codigoLoteExibido(m)) + '</td><td>' + tipo +
+        '</td><td class="numero">' + Number(m.quantidade) + " " + escaparHtmlAlmox(m.unidade) +
+        '</td><td>' + estoque + '</td><td>' + escaparHtmlAlmox(m.usuario_nome || "—") +
+        '</td><td>' + escaparHtmlAlmox(m.motivo || (transferencia ? "Transferência interna" : "—")) + "</td></tr>";
+    }).join("") + "</tbody></table></div>";
 }
+
 
 function renderRequisicoes(requisicoes, lotes, gerente) {
   if (!requisicoes.length) return '<p class="vazio">Nenhuma requisição registrada.</p>';
   return '<div class="lista-requisicoes">' + requisicoes.map((r) => {
     const restante = Math.max(0, Number(r.quantidade_solicitada) - Number(r.quantidade_atendida));
-    const disponiveis = lotes.filter((l) => Number(l.item_id) === Number(r.item_id) && Number(l.saldo) > 0 && l.status_exibicao === "DISPONIVEL");
+    const disponiveis = lotes.filter((l) => Number(l.item_id) === Number(r.item_id) &&
+      Number(l.saldo) > 0 && l.status_exibicao === "DISPONIVEL" && l.estoque === "ALMOXARIFADO");
     const opcoes = disponiveis.map((l) => '<option value="' + l.lote_id + '">' + escaparHtmlAlmox(
-      l.codigo_lote + (l.controla_lote ? "" : " · interno") + " · vence " + (l.validade || "sem validade") + " · saldo " + l.saldo + " " + l.unidade
-    ) + "</option>").join("");
-    return '<article class="requisicao"><div><strong>Requisição #' + r.requisicao_id + " · " + escaparHtmlAlmox(r.item_nome) +
-      '</strong><span class="status ' + classeStatus(r.status) + '">' + escaparHtmlAlmox(r.status) + "</span></div><p>Solicitante: " +
-      escaparHtmlAlmox(r.solicitante || "Usuário") + " · Setor: " + escaparHtmlAlmox(r.setor) + " · Pedido: " +
+      codigoLoteExibido(l) + " · saldo " + l.saldo + " " + l.unidade) + "</option>").join("");
+    return '<article class="requisicao"><div><strong>#' + r.requisicao_id + " · " + escaparHtmlAlmox(r.item_nome) +
+      '</strong><span class="status ' + classeStatus(r.status) + '">' + r.status + '</span></div><p>' +
+      escaparHtmlAlmox(r.solicitante || "Colaborador") + " · " + escaparHtmlAlmox(r.setor) + " · Pedido: " +
       Number(r.quantidade_solicitada) + " " + escaparHtmlAlmox(r.unidade) + " · Atendido: " + Number(r.quantidade_atendida) +
       " · Restante: " + restante + "</p>" + (r.observacao ? "<p>" + escaparHtmlAlmox(r.observacao) + "</p>" : "") +
       (gerente && restante > 0 ? '<form class="linha-form" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="atender">' +
         '<input type="hidden" name="requisicao_item_id" value="' + r.requisicao_item_id + '"><select name="lote_id" required>' +
-        '<option value="">Lote sugerido (FEFO)</option>' + opcoes + "</select>" +
-        '<input name="quantidade" type="number" min="0.001" max="' + restante + '" step="0.001" value="' + restante + '" required>' +
+        '<option value="">Selecione o lote</option>' + opcoes + "</select>" +
+        '<input name="quantidade" type="number" min="1" max="' + restante + '" step="1" value="' + restante + '" required>' +
         '<button>Confirmar saída</button></form>' : "") + "</article>";
   }).join("") + "</div>";
 }
 
+
 function formularioItem() {
   return '<form class="form-grid" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="criar_item">' +
-    '<label>Código<input name="codigo" maxlength="40" required></label><label>Nome<input name="nome" maxlength="120" required></label>' +
+    '<label>Código (opcional)<input name="codigo" maxlength="40" placeholder="Pode deixar em branco"></label>' +
+    '<label>Nome do material<input name="nome" maxlength="120" required placeholder="Ex.: Smart Dent Bite Splint"></label>' +
     '<label>Tipo<select name="tipo" required>' + TIPOS_ITEM.map((t) => '<option value="' + t + '">' + t + "</option>").join("") + '</select></label>' +
-    '<label>Unidade única<select name="unidade"><option>un</option><option>mL</option><option>g</option></select></label>' +
-    '<label>Local padrão<input name="local_padrao" maxlength="100" required placeholder="Ex.: Armário A"></label>' +
-    '<label>Estoque mínimo<input name="quantidade_minima" type="number" min="0" step="0.001" value="0" required></label>' +
-    '<p class="muted">Reagentes, padrões e kits exigem lote e validade automaticamente. Os demais tipos podem ativar esse controle.</p>' +
-    '<label class="checkbox"><input type="checkbox" name="controla_lote" value="1"> Controla lote e validade para este item</label>' +
-    '<div class="acoes"><button>Cadastrar item</button></div></form>';
+    '<label>Unidade<select name="unidade"><option value="un" selected>un</option><option value="mL">mL</option><option value="g">g</option></select></label>' +
+    '<div class="acoes"><button>Cadastrar material</button></div></form>' +
+    '<p class="muted">O código é criado automaticamente quando não for informado. As quantidades são sempre inteiras.</p>';
 }
+
 
 function formularioEntrada(itens) {
   return '<form class="form-grid" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="receber">' +
-    '<label class="largo">Item<select name="item_id" required>' + selItens(itens) + '</select></label>' +
-    '<label>Número do lote<input name="codigo_lote" maxlength="80" placeholder="Obrigatório para item rastreado"></label>' +
-    '<label>Validade<input name="validade" type="date"></label><label>Quantidade recebida<input name="quantidade" type="number" min="0.001" step="0.001" required></label>' +
-    '<label>Localização<input name="localizacao" maxlength="100" placeholder="Usa o local padrão se vazio"></label><label>Fornecedor<input name="fornecedor" maxlength="120"></label>' +
-    '<label>Nota / documento<input name="documento_entrada" maxlength="100"></label><label>Data de recebimento<input name="recebido_em" type="date" value="' +
-    new Date().toISOString().slice(0, 10) + '"></label><label>Situação<select name="status"><option value="DISPONIVEL">Conferido · disponível</option>' +
-    '<option value="QUARENTENA">Aguardando conferência · quarentena</option></select></label><div class="acoes"><button>Registrar entrada</button></div></form>';
+    '<label class="largo">Material<select name="item_id" required>' + selItens(itens) + '</select></label>' +
+    '<label>Quantidade recebida<input name="quantidade" type="number" min="1" step="1" value="1" required></label>' +
+    '<label>Lote (opcional)<input name="codigo_lote" maxlength="80" placeholder="Pode deixar em branco"></label>' +
+    '<label>Validade (opcional)<input name="validade" type="date"></label>' +
+    '<label>Fornecedor (opcional)<input name="fornecedor" maxlength="120"></label>' +
+    '<div class="acoes"><button>Registrar entrada</button></div></form>' +
+    '<p class="muted">Toda entrada vai diretamente para o estoque do Almoxarifado. A validade e o fornecedor podem ficar em branco.</p>';
 }
+
 
 function formularioRequisicao(itens, user) {
   const setores = setoresDisponiveisAlmox(user);
@@ -455,39 +539,48 @@ function formularioRequisicao(itens, user) {
     '<label>Setor<select name="setor" required>' + (setores.length > 1 ? '<option value="">Selecione seu setor</option>' : "") +
     opcoesSetor + '</select></label>' +
     '<label class="largo">Material<select name="item_id" required>' + selItens(itens) + '</select></label>' +
-    '<label>Quantidade<input name="quantidade" type="number" min="0.001" step="0.001" required></label>' +
-    '<label class="largo">Observação / finalidade<input name="observacao" maxlength="300" placeholder="Onde ou para que será usado?"></label>' +
+    '<label>Quantidade<input name="quantidade" type="number" min="1" step="1" value="1" required></label>' +
+    '<label class="largo">Observação (opcional)<input name="observacao" maxlength="300" placeholder="Para que será usado?"></label>' +
     '<div class="acoes"><button>Enviar requisição</button></div></form>';
 }
 
+
 function formularioOperacao(lotes) {
+  const disponiveis = lotes.filter((l) => l.estoque === "ALMOXARIFADO" &&
+    Number(l.saldo) > 0 && l.status_exibicao === "DISPONIVEL");
   return '<form class="form-grid" method="POST" action="/almoxarifado/acao"><input type="hidden" name="acao" value="movimento_especial">' +
-    '<label class="largo">Lote<select name="lote_id" required><option value="">Selecione o lote</option>' +
-    lotes.filter((l) => Number(l.saldo) > 0).map((l) => '<option value="' + l.lote_id + '">' +
-      escaparHtmlAlmox(l.nome + " · " + l.codigo_lote + " · saldo " + l.saldo + " " + l.unidade + " · " + l.localizacao) + "</option>"
-    ).join("") + '</select></label><label>Operação<select name="tipo"><option value="PERDA">Perda</option>' +
-    '<option value="VENCIMENTO">Vencimento / descarte</option><option value="TRANSFERENCIA">Transferência de local</option></select></label>' +
-    '<label>Quantidade<input name="quantidade" type="number" min="0.001" step="0.001" required></label>' +
-    '<label>Local de destino (transferência)<input name="local_destino" maxlength="100"></label>' +
-    '<label class="largo">Motivo<input name="motivo" minlength="4" maxlength="300" required></label><div class="acoes"><button>Registrar movimento</button></div></form>';
+    '<label class="largo">Material<select name="lote_id" required><option value="">Selecione o material</option>' +
+    disponiveis.map((l) => '<option value="' + l.lote_id + '">' +
+      escaparHtmlAlmox(l.nome + " · saldo " + l.saldo + " " + l.unidade +
+        (l.validade ? " · validade " + l.validade : "")) + "</option>"
+    ).join("") + '</select></label>' +
+    '<label>Operação<select name="tipo"><option value="TRANSFERENCIA">Saída para Impressão</option>' +
+    '<option value="PERDA">Perda</option><option value="VENCIMENTO">Vencimento / descarte</option></select></label>' +
+    '<label>Quantidade<input name="quantidade" type="number" min="1" step="1" value="1" required></label>' +
+    '<label class="largo">Motivo / observação (opcional na transferência)<input name="motivo" maxlength="300" placeholder="Opcional para transferência"></label>' +
+    '<div class="acoes"><button>Registrar movimento</button></div></form>' +
+    '<p class="muted">A saída para Impressão reduz o Almoxarifado e aumenta o estoque Digital na mesma operação. Para perda ou descarte, o motivo continua obrigatório.</p>';
 }
+
 
 function formularioInventario(lotes) {
   if (!lotes.length) return '<p class="vazio">Nenhum lote para contagem.</p>';
-  return '<div class="tabela-wrap"><table><thead><tr><th>Item</th><th>Lote</th><th>Local</th><th>Saldo do sistema</th><th>Contagem física / motivo</th></tr></thead><tbody>' +
-    lotes.map((l) => '<tr><td>' + escaparHtmlAlmox(l.nome) + '</td><td>' + escaparHtmlAlmox(l.codigo_lote) + '</td><td>' +
-      escaparHtmlAlmox(l.localizacao) + '</td><td>' + Number(l.saldo) + " " + escaparHtmlAlmox(l.unidade) + '</td><td><form class="linha-form" method="POST" action="/almoxarifado/acao">' +
+  return '<div class="tabela-wrap"><table><thead><tr><th>Material</th><th>Estoque</th><th>Saldo do sistema</th><th>Contagem física / motivo</th></tr></thead><tbody>' +
+    lotes.map((l) => '<tr><td>' + escaparHtmlAlmox(l.nome + " · " + codigoLoteExibido(l)) +
+      '</td><td>' + textoEstoqueAlmox(l.estoque) + '</td><td>' + Number(l.saldo) + " " +
+      escaparHtmlAlmox(l.unidade) + '</td><td><form class="linha-form" method="POST" action="/almoxarifado/acao">' +
       '<input type="hidden" name="acao" value="ajustar_inventario"><input type="hidden" name="lote_id" value="' + l.lote_id + '">' +
-      '<input name="quantidade_contada" type="number" min="0" step="0.001" value="' + Number(l.saldo) + '" required>' +
+      '<input name="quantidade_contada" type="number" min="0" step="1" value="' + Math.max(0,Math.round(Number(l.saldo))) + '" required>' +
       '<input name="motivo" minlength="4" maxlength="300" placeholder="Motivo da diferença" required><button class="secundario">Conferir</button></form></td></tr>'
     ).join("") + "</tbody></table></div>";
 }
 
-function layoutAlmox(user, view, content, gerente, notice = "", almoxarifeExclusivo = false) {
-  const links = gerente
+
+function layoutAlmox(user, view, content, gerente, notice = "", almoxarifeExclusivo = false, linksOverride = null) {
+  const links = linksOverride || (gerente
     ? [["dashboard","Painel"],["itens","Itens"],["entrada","Entrada"],["requisicoes","Requisições"],["lotes","Lotes"],["movimentos","Movimentos"],["inventario","Inventário"]]
-    : [["itens","Consultar materiais"],["requisicoes","Requisições"]];
-  const nav = links.map(([key,label]) => '<a class="' + (view === key ? "ativo" : "") + '" href="/almoxarifado?view=' + key + '">' + label + "</a>").join("");
+    : [["itens","Consultar materiais"],["requisicoes","Requisições"]]);
+  const nav = links.map(([key,label]) => '<a class="' + (view === key ? "ativo" : "") + '" href="' + (key === "estoque" ? "/digital/estoque" : "/almoxarifado?view=" + key) + '">' + label + "</a>").join("");
   const css = [
     ":root{color-scheme:light;--ink:#17233b;--muted:#62708a;--line:#e3e9f2;--paper:#f4f7fb;--blue:#2872c8;--blue2:#e8f1ff;--green:#157347;--yellow:#946200;--red:#b42318}",
     "*{box-sizing:border-box}body{margin:0;background:var(--paper);color:var(--ink);font:14px/1.5 Inter,system-ui,-apple-system,Segoe UI,sans-serif}",
@@ -528,57 +621,67 @@ async function renderView(env, user, url) {
   let content = "";
   let requisicoes = [];
   const notice = String(url.searchParams.get("ok") || url.searchParams.get("erro") || "");
+
   if (view === "dashboard") {
     const painel = await dadosPainel(env);
-    const abaixo = itens.filter((i) => Number(i.saldo_disponivel) < Number(i.quantidade_minima));
-    const vencendo = lotes.filter((l) => Number(l.saldo) > 0 && l.validade && l.validade >= new Date().toISOString().slice(0, 10) &&
-      l.validade <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) && l.status_exibicao === "DISPONIVEL");
+    const semEstoque = itens.filter((i) => Number(i.saldo_almoxarifado_disponivel || 0) <= 0);
+    const vencendo = lotes.filter((l) => Number(l.saldo) > 0 && l.validade &&
+      l.validade >= new Date().toISOString().slice(0, 10) &&
+      l.validade <= new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10) &&
+      l.status_exibicao === "DISPONIVEL");
     content = '<div class="grid">' +
-      [["Itens ativos", painel.itens],["Abaixo do mínimo",painel.abaixo_minimo],["Requisições abertas",painel.requisicoes_abertas],["Vencendo em 30 dias",painel.vencendo_30]].map((x) =>
+      [["Materiais cadastrados",painel.itens],["Sem estoque no Almoxarifado",painel.sem_estoque],
+       ["Requisições abertas",painel.requisicoes_abertas],["Vencendo em 30 dias",painel.vencendo_30]].map((x) =>
         '<div class="card"><small>' + x[0] + "</small><strong>" + x[1] + "</strong></div>").join("") +
-      '</div><section class="panel"><h2>Alertas de validade</h2><div class="detail"><div><small>Até 30 dias</small><strong>' +
+      '</div><section class="panel"><h2>Validades próximas</h2><div class="detail"><div><small>Até 30 dias</small><strong>' +
       painel.vencendo_30 + '</strong></div><div><small>Até 60 dias</small><strong>' + painel.vencendo_60 +
       '</strong></div><div><small>Até 90 dias</small><strong>' + painel.vencendo_90 + '</strong></div></div>' +
       (vencendo.length ? renderTabelaLotes(vencendo,false) : '<p class="vazio">Nenhum lote disponível vence nos próximos 30 dias.</p>') +
-      '</section><section class="panel"><h2>Itens abaixo do mínimo</h2>' + renderTabelaItens(abaixo,gerente) + '</section>';
-    requisicoes = (await dadosRequisicoes(env, gerente ? null : user)).filter((r) => ["ABERTA","PARCIAL"].includes(r.status)).slice(0,8);
-    content += '<section class="panel"><h2>Requisições pendentes</h2>' + renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
+      '</section><section class="panel"><h2>Materiais sem saldo no Almoxarifado</h2>' + renderTabelaItens(semEstoque,gerente) + '</section>';
+    requisicoes = (await dadosRequisicoes(env,gerente ? null : user))
+      .filter((r) => ["ABERTA","PARCIAL"].includes(r.status)).slice(0,8);
+    content += '<section class="panel"><h2>Requisições pendentes</h2>' +
+      renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
   } else if (view === "itens") {
     const busca = String(url.searchParams.get("q") || "");
-    content = (gerente ? '<section class="panel"><h2>Novo item</h2>' + formularioItem() + '</section>' : "") +
-      '<section class="panel"><h2>Catálogo de materiais</h2><form class="linha-form" method="GET" action="/almoxarifado">' +
+    content = (gerente ? '<section class="panel"><h2>Cadastrar material</h2>' + formularioItem() + '</section>' : "") +
+      '<section class="panel"><h2>Estoque de materiais</h2><form class="linha-form" method="GET" action="/almoxarifado">' +
       '<input type="hidden" name="view" value="itens"><input name="q" value="' + escaparHtmlAlmox(busca) +
-      '" placeholder="Buscar por código ou nome"><button>Buscar</button></form><br>' + renderTabelaItens(itens,gerente) + '</section>';
+      '" placeholder="Buscar por nome ou código"><button>Buscar</button></form><br>' + renderTabelaItens(itens,gerente) + '</section>';
   } else if (view === "entrada") {
-    content = gerente ? '<section class="panel"><h2>Registrar recebimento</h2><p class="muted">O material conferido entra como disponível. Material pendente de checagem entra em quarentena.</p>' +
-      formularioEntrada(itens) + '</section>' : '<section class="panel"><p>Entrada de materiais restrita à administração e coordenação.</p></section>';
+    content = gerente ? '<section class="panel"><h2>Nova entrada</h2>' +
+      formularioEntrada(itens) + '</section>' :
+      '<section class="panel"><p>Entrada de materiais restrita aos responsáveis pelo Almoxarifado.</p></section>';
   } else if (view === "requisicoes") {
-    requisicoes = await dadosRequisicoes(env, gerente ? null : user);
+    requisicoes = await dadosRequisicoes(env,gerente ? null : user);
     content = '<section class="panel"><h2>Solicitar material</h2>' + formularioRequisicao(itens,user) + '</section>' +
       '<section class="panel"><h2>Pedidos registrados</h2>' + renderRequisicoes(requisicoes,lotes,gerente) + '</section>';
   } else if (view === "lotes") {
-    content = '<section class="panel"><h2>Lotes e saldos</h2><p class="muted">Sugestão de atendimento ordenada por FEFO. Lotes vencidos, em quarentena ou bloqueados não podem ser usados em saídas comuns.</p>' +
+    content = '<section class="panel"><h2>Lotes e saldos</h2><p class="muted">Consulte os lotes e em qual estoque cada quantidade está disponível.</p>' +
       renderTabelaLotes(lotes,gerente) + '</section>';
   } else if (view === "movimentos") {
-    content = (gerente ? '<section class="panel"><h2>Perda, vencimento ou transferência</h2>' + formularioOperacao(lotes) + '</section>' : "");
-    content += '<section class="panel"><h2>Histórico imutável</h2>' + renderTabelaMovimentos(await dadosMovimentos(env)) + '</section>';
+    content = (gerente ? '<section class="panel"><h2>Saída para Impressão, perda ou vencimento</h2>' +
+      formularioOperacao(lotes) + '</section>' : "");
+    content += '<section class="panel"><h2>Histórico de movimentos</h2>' +
+      renderTabelaMovimentos(await dadosMovimentos(env)) + '</section>';
   } else if (view === "inventario") {
-    content = gerente ? '<section class="panel"><h2>Contagem física e ajuste</h2><p class="muted">Informe o saldo contado. A diferença será registrada como movimento de ajuste com o motivo, sem apagar o histórico.</p>' +
-      formularioInventario(lotes) + '</section>' : '<section class="panel"><p>Inventário restrito à administração e coordenação.</p></section>';
+    content = gerente ? '<section class="panel"><h2>Contagem física e ajuste</h2>' +
+      '<p class="muted">Informe a quantidade inteira encontrada. O histórico anterior será preservado.</p>' +
+      formularioInventario(lotes) + '</section>' :
+      '<section class="panel"><p>Inventário restrito aos responsáveis pelo Almoxarifado.</p></section>';
   } else if (view === "item") {
     const itemId = Number(url.searchParams.get("id") || 0);
     const item = itens.find((x) => Number(x.id) === itemId);
-    if (!item) content = '<section class="panel"><p>Item não encontrado.</p></section>';
+    if (!item) content = '<section class="panel"><p>Material não encontrado.</p></section>';
     else {
       const lotesItem = lotes.filter((x) => Number(x.item_id) === itemId);
       const movs = (await dadosMovimentos(env)).filter((x) => Number(x.item_id) === itemId);
-      content = '<section class="panel"><h2>' + escaparHtmlAlmox(item.codigo + " · " + item.nome) + '</h2><div class="detail">' +
-        '<div><small>Saldo disponível</small><strong>' + Number(item.saldo_disponivel) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
-        '<div><small>Saldo físico total</small><strong>' + Number(item.saldo_total) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
-        '<div><small>Estoque mínimo</small><strong>' + Number(item.quantidade_minima) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
-        '<div><small>Local padrão</small><strong>' + escaparHtmlAlmox(item.local_padrao) + '</strong></div>' +
-        '<div><small>Rastreabilidade</small><strong>' + (item.controla_lote ? "Lote e validade" : "Lote interno") + '</strong></div>' +
-        '</div></section><section class="panel"><h2>Lotes</h2>' + renderTabelaLotes(lotesItem,gerente) +
+      content = '<section class="panel"><h2>' + escaparHtmlAlmox(item.nome) + '</h2><div class="detail">' +
+        '<div><small>Estoque do Almoxarifado</small><strong>' + Number(item.saldo_almoxarifado) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
+        '<div><small>Estoque da Impressão</small><strong>' + Number(item.saldo_impressao) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
+        '<div><small>Total nos dois estoques</small><strong>' + Number(item.saldo_total) + " " + escaparHtmlAlmox(item.unidade) + '</strong></div>' +
+        '<div><small>Tipo</small><strong>' + escaparHtmlAlmox(item.tipo_exibicao || item.tipo) + '</strong></div>' +
+        '</div></section><section class="panel"><h2>Quantidades por lote</h2>' + renderTabelaLotes(lotesItem,gerente) +
         '</section><section class="panel"><h2>Histórico de movimentos</h2>' + renderTabelaMovimentos(movs) + '</section>';
     }
   } else {
@@ -587,21 +690,26 @@ async function renderView(env, user, url) {
   return respostaHtml(layoutAlmox(user,view,content,gerente,notice,almoxarifeExclusivo));
 }
 
+
 async function processarFormulario(request, env, user) {
   const form = await request.formData();
   const action = String(form.get("acao") || "");
   const get = (key) => String(form.get(key) ?? "").trim();
-  if (!(await podeGerenciarAlmox(env,user)) && action !== "requisitar") throw new Error("Ação restrita aos responsáveis do Almoxarifado.");
+  if (!(await podeGerenciarAlmox(env,user)) && action !== "requisitar") {
+    throw new Error("Ação restrita aos responsáveis do Almoxarifado.");
+  }
   if (action === "criar_item") {
-    await criarItem(env,user,{codigo:get("codigo"),nome:get("nome"),tipo:get("tipo"),unidade:get("unidade"),local_padrao:get("local_padrao"),quantidade_minima:get("quantidade_minima"),controla_lote:form.get("controla_lote")==="1"});
-    return "/almoxarifado?view=itens&ok=" + encodeURIComponent("Item cadastrado.");
+    await criarItem(env,user,{codigo:get("codigo"),nome:get("nome"),tipo:get("tipo"),unidade:get("unidade")});
+    return "/almoxarifado?view=itens&ok=" + encodeURIComponent("Material cadastrado.");
   }
   if (action === "receber") {
-    await receberMaterial(env,user,{item_id:get("item_id"),codigo_lote:get("codigo_lote"),validade:get("validade"),quantidade:get("quantidade"),localizacao:get("localizacao"),fornecedor:get("fornecedor"),documento_entrada:get("documento_entrada"),recebido_em:get("recebido_em"),status:get("status")});
-    return "/almoxarifado?view=entrada&ok=" + encodeURIComponent("Entrada registrada no histórico.");
+    await receberMaterial(env,user,{item_id:get("item_id"),codigo_lote:get("codigo_lote"),
+      validade:get("validade"),quantidade:get("quantidade"),fornecedor:get("fornecedor")});
+    return "/almoxarifado?view=entrada&ok=" + encodeURIComponent("Entrada registrada no estoque do Almoxarifado.");
   }
   if (action === "requisitar") {
-    await criarRequisicao(env,user,{item_id:get("item_id"),quantidade:get("quantidade"),observacao:get("observacao"),setor:get("setor")});
+    await criarRequisicao(env,user,{item_id:get("item_id"),quantidade:get("quantidade"),
+      observacao:get("observacao"),setor:get("setor")});
     return "/almoxarifado?view=requisicoes&ok=" + encodeURIComponent("Requisição enviada ao Almoxarifado.");
   }
   if (action === "atender") {
@@ -609,11 +717,13 @@ async function processarFormulario(request, env, user) {
     return "/almoxarifado?view=requisicoes&ok=" + encodeURIComponent("Saída registrada e vinculada à requisição.");
   }
   if (action === "ajustar_inventario") {
-    await ajustarInventario(env,user,{lote_id:get("lote_id"),quantidade_contada:get("quantidade_contada"),motivo:get("motivo"),referencia:"CONTAGEM FÍSICA"});
+    await ajustarInventario(env,user,{lote_id:get("lote_id"),quantidade_contada:get("quantidade_contada"),
+      motivo:get("motivo"),referencia:"CONTAGEM FÍSICA"});
     return "/almoxarifado?view=inventario&ok=" + encodeURIComponent("Contagem conferida. Diferença registrada, se existente.");
   }
   if (action === "movimento_especial") {
-    await registrarMovimentoEspecial(env,user,{lote_id:get("lote_id"),tipo:get("tipo"),quantidade:get("quantidade"),local_destino:get("local_destino"),motivo:get("motivo")});
+    await registrarMovimentoEspecial(env,user,{lote_id:get("lote_id"),tipo:get("tipo"),
+      quantidade:get("quantidade"),motivo:get("motivo")});
     return "/almoxarifado?view=movimentos&ok=" + encodeURIComponent("Movimento registrado.");
   }
   if (action === "status_lote") {
@@ -622,6 +732,7 @@ async function processarFormulario(request, env, user) {
   }
   throw new Error("Ação não reconhecida.");
 }
+
 
 async function handleApi(request, env, url, user) {
   const path = url.pathname;
@@ -792,6 +903,92 @@ export async function injetarGestaoEquipeAlmoxarifado(response, request, env) {
   return new Response(updated,{status:response.status,statusText:response.statusText,headers});
 }
 
+
+function formularioConsumoImpressao(lotes) {
+  const disponiveis = lotes.filter((l) => l.estoque === "IMPRESSAO" &&
+    Number(l.saldo) > 0 && l.status_exibicao === "DISPONIVEL");
+  if (!disponiveis.length) {
+    return '<p class="vazio">Ainda não há materiais disponíveis no estoque da Impressão. Solicite ao Almoxarifado uma transferência.</p>';
+  }
+  return '<form class="form-grid" method="POST" action="/digital/estoque">' +
+    '<label class="largo">Material / lote<select name="lote_id" required><option value="">Selecione o material</option>' +
+    disponiveis.map((l) => '<option value="' + l.lote_id + '">' +
+      escaparHtmlAlmox(l.nome + " · saldo " + l.saldo + " " + l.unidade +
+        (l.validade ? " · validade " + l.validade : "")) + '</option>').join("") +
+    '</select></label><label>Quantidade utilizada<input name="quantidade" type="number" min="1" step="1" value="1" required></label>' +
+    '<label>Observação (opcional)<input name="observacao" maxlength="300" placeholder="Ex.: impressão de placas"></label>' +
+    '<div class="acoes"><button>Registrar consumo</button></div></form>';
+}
+
+async function registrarConsumoImpressao(env, user, body) {
+  const loteId = Number(body.lote_id);
+  const quantidade = numeroPositivo(body.quantidade);
+  const observacao = String(body.observacao || "").trim().slice(0, 300) || "Consumo na Impressão";
+  const lote = await primeiro(env.db,
+    "SELECT s.*,l.estoque,l.status AS status_real,l.validade AS validade_real " +
+    "FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=?",
+    loteId);
+  if (!lote || lote.estoque !== "IMPRESSAO") {
+    throw new Error("Este material não pertence ao estoque da Impressão.");
+  }
+  if (lote.status_real !== "DISPONIVEL" ||
+      (lote.validade_real && lote.validade_real < new Date().toISOString().slice(0, 10))) {
+    throw new Error("Este lote não está disponível para uso.");
+  }
+  if (Number(lote.saldo) < quantidade) throw new Error("Quantidade maior que o saldo disponível.");
+  await executar(env.db,
+    "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,motivo,usuario_id) " +
+    "VALUES (?,?,'SAIDA',?,'CONSUMO_IMPRESSAO',?,?)",
+    lote.item_id, loteId, quantidade, observacao, user.id);
+}
+
+export async function handleEstoqueImpressao(request, env, url) {
+  const user = await obterUsuarioLogado(request,env);
+  if (!user) return new Response(null,{status:302,headers:{Location:"/"}});
+  const permitido = gerenteAlmox(user) || setoresDisponiveisAlmox(user).includes("DIGITAL:IMPRESSAO");
+  if (!permitido) {
+    return respostaHtml(layoutAlmox(user,"estoque",'<section class="panel"><p>Acesso restrito ao setor de Impressão.</p></section>',
+      false,"",false,[["estoque","Estoque da Impressão"]]),403);
+  }
+
+  try {
+    if (request.method === "POST") {
+      const origin = request.headers.get("origin");
+      const crossSite = request.headers.get("sec-fetch-site") === "cross-site";
+      if ((origin && origin !== new URL(request.url).origin) || crossSite) {
+        return redirecionar("/digital/estoque?erro=" + encodeURIComponent("Origem da solicitação não autorizada."));
+      }
+      const form = await request.formData();
+      await registrarConsumoImpressao(env,user,{
+        lote_id:String(form.get("lote_id") || ""),
+        quantidade:String(form.get("quantidade") || ""),
+        observacao:String(form.get("observacao") || "")
+      });
+      return redirecionar("/digital/estoque?ok=" + encodeURIComponent("Consumo registrado no estoque da Impressão."));
+    }
+
+    if (request.method !== "GET") return respostaJson({erro:"Método não permitido."},405);
+
+    const todosLotes = await dadosLotes(env);
+    const lotes = todosLotes.filter((l) => l.estoque === "IMPRESSAO");
+    const itens = await dadosItens(env);
+    const comSaldo = itens.filter((i) => Number(i.saldo_impressao || 0) > 0);
+    const content = '<section class="panel"><h2>Materiais disponíveis</h2>' +
+      renderTabelaLotes(lotes.filter((l) => Number(l.saldo) > 0),false) +
+      '</section><section class="panel"><h2>Registrar uso</h2>' +
+      formularioConsumoImpressao(lotes) + '</section>' +
+      '<section class="panel"><h2>Resumo do estoque</h2>' +
+      (comSaldo.length ? renderTabelaItens(comSaldo,false) : '<p class="vazio">Nenhum material no estoque da Impressão.</p>') +
+      '</section>';
+    const notice = String(url.searchParams.get("ok") || url.searchParams.get("erro") || "");
+    return respostaHtml(layoutAlmox(user,"estoque",content,gerenteAlmox(user),notice,false,
+      [["estoque","Estoque da Impressão"]]));
+  } catch (error) {
+    return redirecionar("/digital/estoque?erro=" +
+      encodeURIComponent(String(error?.message || "Falha ao registrar a operação.").slice(0,300)));
+  }
+}
+
 export async function handleAlmoxarifado(request, env, url) {
   const user = await obterUsuarioLogado(request,env);
   const isApi = url.pathname.startsWith("/almoxarifado/api/");
@@ -829,22 +1026,24 @@ export function atualizarIdentificacaoVersaoAlmoxarifado(conteudo, pathname) {
   const texto = String(conteudo ?? "");
   if (pathname === "/service-worker.js") {
     return texto
-      .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.13.0")
-      .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.13.0")
-      .replaceAll("fluxo-lab-v5.11.0", "fluxo-lab-v5.13.0")
-      .replaceAll("fluxo-lab-v5.12.0", "fluxo-lab-v5.13.1")
-      .replaceAll("fluxo-lab-v5.13.0", "fluxo-lab-v5.13.1");
+      .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.11.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.12.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.13.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.13.1", "fluxo-lab-v5.14.0");
   }
   return texto
-    .replaceAll("V5.9.0", "V5.13.0")
-    .replaceAll("V5.10.0", "V5.13.0")
-    .replaceAll("V5.11.0", "V5.13.0")
-    .replaceAll("V5.12.0", "V5.13.1")
-    .replaceAll("V5.13.0", "V5.13.1");
+    .replaceAll("V5.9.0", "V5.14.0")
+    .replaceAll("V5.10.0", "V5.14.0")
+    .replaceAll("V5.11.0", "V5.14.0")
+    .replaceAll("V5.12.0", "V5.14.0")
+    .replaceAll("V5.13.0", "V5.14.0")
+    .replaceAll("V5.13.1", "V5.14.0");
 }
 
 
-export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
+export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell,topbarTitle="Almoxarifado") {
   if (!respostaAlmox || !responseShell || respostaAlmox.status !== 200 || responseShell.status !== 200) {
     return new Response("Área do Almoxarifado indisponível no momento.",{status:500,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}});
   }
@@ -911,7 +1110,8 @@ export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
   const topbarStart=updated.indexOf('<div class="topbar-titulo">');
   const strongStart=topbarStart>=0 ? updated.indexOf("<strong>",topbarStart) : -1;
   const strongEnd=strongStart>=0 ? updated.indexOf("</strong>",strongStart) : -1;
-  if(strongStart>=0 && strongEnd>strongStart) updated=updated.slice(0,strongStart+8)+"Almoxarifado"+updated.slice(strongEnd);
+  const tituloTopbar=escaparHtmlAlmox(topbarTitle || "Almoxarifado");
+  if(strongStart>=0 && strongEnd>strongStart) updated=updated.slice(0,strongStart+8)+tituloTopbar+updated.slice(strongEnd);
   const headers=new Headers(responseShell.headers);
   headers.delete("content-length");headers.delete("content-encoding");
   headers.set("cache-control","private, no-store");
@@ -1029,6 +1229,29 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
       updated = updated.replace(re,(whole,open,inner,close)=>open+inner+link+close);
     }
 
+  }
+
+
+  if (ehHtml && updated.includes('class="sidebar-nav"')) {
+    const userEstoque = env?.db ? await obterUsuarioLogado(request,env) : null;
+    const podeVerEstoqueImpressao = gerenteAlmox(userEstoque) ||
+      setoresDisponiveisAlmox(userEstoque).includes("DIGITAL:IMPRESSAO");
+    if (podeVerEstoqueImpressao && !updated.includes('href="/digital/estoque"')) {
+      const linkEstoque = '<a href="/digital/estoque" class="digital-estoque-nav-link"><span class="nav-icone">▣</span><span>Estoque da Impressão</span></a>';
+      let inserido = false;
+      updated = updated.replace(/(<a\b[^>]*href="\/digital\/?[^"]*"[^>]*>[\s\S]*?<\/a>)/i, (match) => {
+        inserido = true;
+        return match + linkEstoque;
+      });
+      if (!inserido) {
+        const grupo = /(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/;
+        updated = updated.replace(grupo, (match,inicio,miolo,fim) => {
+          if (inserido) return match;
+          inserido = true;
+          return inicio + miolo + linkEstoque + fim;
+        });
+      }
+    }
   }
 
   const headers = new Headers(response.headers);

@@ -1,14 +1,28 @@
-// FLUXO LAB V5.13.1 — ponto de entrada único
+// FLUXO LAB V5.14.0 — ponto de entrada único
 // O Worker legado continua responsável por toda a aplicação existente.
 // O Almoxarifado é interceptado aqui e compartilha autenticação, D1 e deploy oficiais.
 import legado from "./legacy.js";
-import { handleAlmoxarifado, integrarTelaAlmoxarifado, adaptarMeuEspacoAlmoxarife, injetarLinkAlmoxarifado, injetarGestaoEquipeAlmoxarifado, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife } from "./modules/almoxarifado.js";
+import { handleAlmoxarifado, handleEstoqueImpressao, integrarTelaAlmoxarifado, adaptarMeuEspacoAlmoxarife, injetarLinkAlmoxarifado, injetarGestaoEquipeAlmoxarifado, ehFuncionarioAlmoxarifado, deveBloquearRotaAlmoxarife } from "./modules/almoxarifado.js";
 import { obterUsuarioLogado } from "./core/auth.js";
 
 export default {
   ...legado,
   async fetch(request, env, ctx) {
     const url = new URL(request.url);
+
+    if (url.pathname === "/digital/estoque" || url.pathname.startsWith("/digital/estoque/")) {
+      const respostaEstoque = await handleEstoqueImpressao(request,env,url);
+      const tipoEstoque = respostaEstoque?.headers?.get("content-type") || "";
+      if (respostaEstoque?.status === 200 && tipoEstoque.includes("text/html")) {
+        const shellUrl = new URL("/meu-perfil",request.url);
+        const shellRequest = new Request(shellUrl,{method:"GET",headers:request.headers});
+        const shellOriginal = await legado.fetch(shellRequest,env,ctx);
+        const shell = await injetarLinkAlmoxarifado(shellOriginal,shellRequest,env);
+        return integrarTelaAlmoxarifado(respostaEstoque,shell,"Estoque da Impressão");
+      }
+      return respostaEstoque;
+    }
+
     const rotaAlmoxarifado = url.pathname === "/almoxarifado" || url.pathname.startsWith("/almoxarifado/");
     if (rotaAlmoxarifado) {
       const respostaAlmox = await handleAlmoxarifado(request, env, url);

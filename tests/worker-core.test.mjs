@@ -219,19 +219,19 @@ test("conta de almoxarife usa área independente e não ganha acesso de produç�
   assert.match(source, /processarEquipeAlmoxarifado/);
 });
 
-test("interface identifica a versão 5.13.1 nas páginas HTML", () => {
+test("interface identifica a versão 5.14.0 nas páginas HTML", () => {
   const html = '<title>Fluxo Lab V5.9.0</title><span>V5.10.0 · V5.11.0 · V5.12.0</span>';
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(html, "/funcionarios"),
-    '<title>Fluxo Lab V5.13.1</title><span>V5.13.1 · V5.13.1 · V5.13.1</span>'
+    '<title>Fluxo Lab V5.14.0</title><span>V5.14.0 · V5.14.0 · V5.14.0</span>'
   );
 });
 
-test("service worker recebe uma chave de cache nova na V5.13.1", () => {
+test("service worker recebe uma chave de cache nova na V5.14.0", () => {
   const source = "const FLUXO_CACHE='fluxo-lab-v5.9.0';const OLD='fluxo-lab-v5.10.0';const PREV='fluxo-lab-v5.11.0';";
   assert.equal(
     atualizarIdentificacaoVersaoAlmoxarifado(source, "/service-worker.js"),
-    "const FLUXO_CACHE='fluxo-lab-v5.13.1';const OLD='fluxo-lab-v5.13.1';const PREV='fluxo-lab-v5.13.1';"
+    "const FLUXO_CACHE='fluxo-lab-v5.14.0';const OLD='fluxo-lab-v5.14.0';const PREV='fluxo-lab-v5.14.0';"
   );
 });
 
@@ -242,7 +242,7 @@ test("injeta menu e versão atualizada no HTML servido pelo Worker legado", asyn
     new Request("https://app.markfree.com.br/funcionarios")
   );
   const html = await response.text();
-  assert.match(html, /V5.13.1/);
+  assert.match(html, /V5.14.0/);
   assert.match(html, /href="\/almoxarifado"/);
   assert.equal(response.headers.get("content-length"), null);
 });
@@ -349,6 +349,6 @@ test("injeta cache novo no service worker sem alterar outros scripts", async () 
     new Response(body, {status:200,headers:{"content-type":"application/javascript; charset=utf-8"}}),
     new Request("https://app.markfree.com.br/service-worker.js")
   );
-  assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.13.1';");
+  assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.14.0';");
 });
 
