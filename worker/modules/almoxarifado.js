@@ -240,17 +240,31 @@ async function atenderRequisicao(env, user, body) {
   const loteId = Number(body.lote_id);
   const quantidade = numeroPositivo(body.quantidade);
   const linha = await primeiro(env.db,
-    "SELECT ri.*,r.id AS requisicao_id,r.status AS status_manual FROM almoxarifado_requisicao_itens ri JOIN almoxarifado_requisicoes r ON r.id=ri.requisicao_id WHERE ri.id=?",
+    "SELECT ri.*,r.id AS requisicao_id,r.status AS status_manual,r.setor FROM almoxarifado_requisicao_itens ri JOIN almoxarifado_requisicoes r ON r.id=ri.requisicao_id WHERE ri.id=?",
     lineId);
-  if (!linha || linha.status_manual === "CANCELADA") throw new Error("Requisição não encontrada ou cancelada.");
+  if (!linha || linha.status_manual === "CANCELADA") {
+    throw new Error("Requisição não encontrada ou cancelada.");
+  }
   const lote = await primeiro(env.db,
-    "SELECT s.*,l.status AS status_real,l.validade AS validade_real FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=? AND s.item_id=? AND s.saldo>0",
+    "SELECT s.*,l.status AS status_real,l.validade AS validade_real,l.estoque FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=? AND s.item_id=? AND s.saldo>0 AND l.estoque='ALMOXARIFADO'",
     loteId, linha.item_id);
-  if (!lote) throw new Error("Lote não encontrado ou sem saldo disponível.");
+  if (!lote) throw new Error("Lote não encontrado no Almoxarifado ou sem saldo disponível.");
+
+  if (String(linha.setor || "").toUpperCase() === "DIGITAL:IMPRESSAO") {
+    await registrarMovimentoEspecial(env,user,{
+      lote_id:loteId,quantidade,tipo:"TRANSFERENCIA",
+      motivo:"Atendimento da requisição #" + linha.requisicao_id,
+      requisicao_item_id:lineId
+    });
+    return;
+  }
+
   await executar(env.db,
     "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,requisicao_item_id,motivo,usuario_id) VALUES (?,?, 'SAIDA', ?, 'REQUISICAO', ?, ?, ?, ?)",
-    linha.item_id, loteId, quantidade, linha.requisicao_id, lineId, "Atendimento da requisição #" + linha.requisicao_id, user.id);
+    linha.item_id, loteId, quantidade, linha.requisicao_id, lineId,
+    "Atendimento da requisição #" + linha.requisicao_id, user.id);
 }
+
 
 async function ajustarInventario(env, user, body) {
   const loteId = Number(body.lote_id);
@@ -275,6 +289,7 @@ async function registrarMovimentoEspecial(env, user, body) {
   const quantidade = numeroPositivo(body.quantidade);
   const tipo = String(body.tipo || "").toUpperCase();
   const motivo = String(body.motivo || "").trim().slice(0, 300);
+  const requisicaoItemId = Number(body.requisicao_item_id) || null;
   if (!["PERDA", "VENCIMENTO", "TRANSFERENCIA"].includes(tipo)) throw new Error("Tipo de movimento inválido.");
   if (["PERDA", "VENCIMENTO"].includes(tipo) && motivo.length < 4) {
     throw new Error("Informe o motivo da perda ou do descarte.");
@@ -298,8 +313,8 @@ async function registrarMovimentoEspecial(env, user, body) {
     await env.db.batch([
       env.db.prepare("INSERT OR IGNORE INTO almoxarifado_lotes (item_id,codigo_lote,validade,localizacao,status,fornecedor,documento_entrada,recebido_em,criado_por,estoque,lote_origem_id) SELECT item_id,?,validade,'Impressão',status,fornecedor,documento_entrada,date('now'),?,'IMPRESSAO',id FROM almoxarifado_lotes WHERE id=? AND estoque='ALMOXARIFADO'")
         .bind(codigoTransferencia,user.id,loteId),
-      env.db.prepare("INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,local_origem,local_destino,motivo,usuario_id) VALUES (?,?,'SAIDA',?,'TRANSFERENCIA',?,'ALMOXARIFADO','IMPRESSAO',?,?)")
-        .bind(lote.item_id,loteId,quantidade,codigoTransferencia,motivoTransferencia,user.id),
+      env.db.prepare("INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,requisicao_item_id,local_origem,local_destino,motivo,usuario_id) VALUES (?,?,'SAIDA',?,'TRANSFERENCIA',?,?, 'ALMOXARIFADO','IMPRESSAO',?,?)")
+        .bind(lote.item_id,loteId,quantidade,codigoTransferencia,requisicaoItemId,motivoTransferencia,user.id),
       env.db.prepare("INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,origem_id,local_origem,local_destino,motivo,usuario_id) SELECT item_id,id,'ENTRADA',?,'TRANSFERENCIA_RECEBIDA',?,'ALMOXARIFADO','IMPRESSAO',?,? FROM almoxarifado_lotes WHERE item_id=? AND lote_origem_id=? AND estoque='IMPRESSAO'")
         .bind(quantidade,codigoTransferencia,motivoTransferencia,user.id,lote.item_id,loteId)
     ]);
