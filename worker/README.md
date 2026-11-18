@@ -1,10 +1,18 @@
-# Fluxo Lab Worker V5.13.1
+# Fluxo Lab Worker V5.14.0
 
 Fonte oficial do Worker de produção. Navegador, Windows e Android continuam usando o mesmo Worker e banco.
 
 - Endereço oficial: https://app.markfree.com.br/
 - Worker: fluxo-lab
 - Ponto de entrada: worker/index.js
+
+## Novidade da V5.14.0
+
+- Almoxarifado simplificado: código opcional, tipo Resina, cadastro sem localização padrão e estoque mínimo.
+- Entradas com quantidades inteiras; lote, validade e fornecedor opcionais.
+- Estoque central do Almoxarifado separado do estoque da Impressão.
+- Transferências parciais registram saída e entrada em uma única operação. O funcionário de Impressão registra o consumo no próprio estoque.
+- Histórico antigo preservado; a migração D1 é aditiva e aplicada separadamente do deploy.
 
 ## Novidade da V5.13.1
 
