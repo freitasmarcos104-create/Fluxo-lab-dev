@@ -888,6 +888,92 @@ export async function injetarGestaoEquipeAlmoxarifado(response, request, env) {
   return new Response(updated,{status:response.status,statusText:response.statusText,headers});
 }
 
+
+function formularioConsumoImpressao(lotes) {
+  const disponiveis = lotes.filter((l) => l.estoque === "IMPRESSAO" &&
+    Number(l.saldo) > 0 && l.status_exibicao === "DISPONIVEL");
+  if (!disponiveis.length) {
+    return '<p class="vazio">Ainda não há materiais disponíveis no estoque da Impressão. Solicite ao Almoxarifado uma transferência.</p>';
+  }
+  return '<form class="form-grid" method="POST" action="/digital/estoque">' +
+    '<label class="largo">Material / lote<select name="lote_id" required><option value="">Selecione o material</option>' +
+    disponiveis.map((l) => '<option value="' + l.lote_id + '">' +
+      escaparHtmlAlmox(l.nome + " · saldo " + l.saldo + " " + l.unidade +
+        (l.validade ? " · validade " + l.validade : "")) + '</option>').join("") +
+    '</select></label><label>Quantidade utilizada<input name="quantidade" type="number" min="1" step="1" value="1" required></label>' +
+    '<label>Observação (opcional)<input name="observacao" maxlength="300" placeholder="Ex.: impressão de placas"></label>' +
+    '<div class="acoes"><button>Registrar consumo</button></div></form>';
+}
+
+async function registrarConsumoImpressao(env, user, body) {
+  const loteId = Number(body.lote_id);
+  const quantidade = numeroPositivo(body.quantidade);
+  const observacao = String(body.observacao || "").trim().slice(0, 300) || "Consumo na Impressão";
+  const lote = await primeiro(env.db,
+    "SELECT s.*,l.estoque,l.status AS status_real,l.validade AS validade_real " +
+    "FROM almoxarifado_saldos_lotes s JOIN almoxarifado_lotes l ON l.id=s.lote_id WHERE s.lote_id=?",
+    loteId);
+  if (!lote || lote.estoque !== "IMPRESSAO") {
+    throw new Error("Este material não pertence ao estoque da Impressão.");
+  }
+  if (lote.status_real !== "DISPONIVEL" ||
+      (lote.validade_real && lote.validade_real < new Date().toISOString().slice(0, 10))) {
+    throw new Error("Este lote não está disponível para uso.");
+  }
+  if (Number(lote.saldo) < quantidade) throw new Error("Quantidade maior que o saldo disponível.");
+  await executar(env.db,
+    "INSERT INTO almoxarifado_movimentos (item_id,lote_id,tipo,quantidade,origem_tipo,motivo,usuario_id) " +
+    "VALUES (?,?,'SAIDA',?,'CONSUMO_IMPRESSAO',?,?)",
+    lote.item_id, loteId, quantidade, observacao, user.id);
+}
+
+export async function handleEstoqueImpressao(request, env, url) {
+  const user = await obterUsuarioLogado(request,env);
+  if (!user) return new Response(null,{status:302,headers:{Location:"/"}});
+  const permitido = gerenteAlmox(user) || setoresDisponiveisAlmox(user).includes("DIGITAL:IMPRESSAO");
+  if (!permitido) {
+    return respostaHtml(layoutAlmox(user,"estoque",'<section class="panel"><p>Acesso restrito ao setor de Impressão.</p></section>',
+      false,"",false,[["estoque","Estoque da Impressão"]]),403);
+  }
+
+  try {
+    if (request.method === "POST") {
+      const origin = request.headers.get("origin");
+      const crossSite = request.headers.get("sec-fetch-site") === "cross-site";
+      if ((origin && origin !== new URL(request.url).origin) || crossSite) {
+        return redirecionar("/digital/estoque?erro=" + encodeURIComponent("Origem da solicitação não autorizada."));
+      }
+      const form = await request.formData();
+      await registrarConsumoImpressao(env,user,{
+        lote_id:String(form.get("lote_id") || ""),
+        quantidade:String(form.get("quantidade") || ""),
+        observacao:String(form.get("observacao") || "")
+      });
+      return redirecionar("/digital/estoque?ok=" + encodeURIComponent("Consumo registrado no estoque da Impressão."));
+    }
+
+    if (request.method !== "GET") return respostaJson({erro:"Método não permitido."},405);
+
+    const todosLotes = await dadosLotes(env);
+    const lotes = todosLotes.filter((l) => l.estoque === "IMPRESSAO");
+    const itens = await dadosItens(env);
+    const comSaldo = itens.filter((i) => Number(i.saldo_impressao || 0) > 0);
+    const content = '<section class="panel"><h2>Materiais disponíveis</h2>' +
+      renderTabelaLotes(lotes.filter((l) => Number(l.saldo) > 0),false) +
+      '</section><section class="panel"><h2>Registrar uso</h2>' +
+      formularioConsumoImpressao(lotes) + '</section>' +
+      '<section class="panel"><h2>Resumo do estoque</h2>' +
+      (comSaldo.length ? renderTabelaItens(comSaldo,false) : '<p class="vazio">Nenhum material no estoque da Impressão.</p>') +
+      '</section>';
+    const notice = String(url.searchParams.get("ok") || url.searchParams.get("erro") || "");
+    return respostaHtml(layoutAlmox(user,"estoque",content,gerenteAlmox(user),notice,false,
+      [["estoque","Estoque da Impressão"]]));
+  } catch (error) {
+    return redirecionar("/digital/estoque?erro=" +
+      encodeURIComponent(String(error?.message || "Falha ao registrar a operação.").slice(0,300)));
+  }
+}
+
 export async function handleAlmoxarifado(request, env, url) {
   const user = await obterUsuarioLogado(request,env);
   const isApi = url.pathname.startsWith("/almoxarifado/api/");
@@ -925,22 +1011,24 @@ export function atualizarIdentificacaoVersaoAlmoxarifado(conteudo, pathname) {
   const texto = String(conteudo ?? "");
   if (pathname === "/service-worker.js") {
     return texto
-      .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.13.0")
-      .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.13.0")
-      .replaceAll("fluxo-lab-v5.11.0", "fluxo-lab-v5.13.0")
-      .replaceAll("fluxo-lab-v5.12.0", "fluxo-lab-v5.13.1")
-      .replaceAll("fluxo-lab-v5.13.0", "fluxo-lab-v5.13.1");
+      .replaceAll("fluxo-lab-v5.9.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.10.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.11.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.12.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.13.0", "fluxo-lab-v5.14.0")
+      .replaceAll("fluxo-lab-v5.13.1", "fluxo-lab-v5.14.0");
   }
   return texto
-    .replaceAll("V5.9.0", "V5.13.0")
-    .replaceAll("V5.10.0", "V5.13.0")
-    .replaceAll("V5.11.0", "V5.13.0")
-    .replaceAll("V5.12.0", "V5.13.1")
-    .replaceAll("V5.13.0", "V5.13.1");
+    .replaceAll("V5.9.0", "V5.14.0")
+    .replaceAll("V5.10.0", "V5.14.0")
+    .replaceAll("V5.11.0", "V5.14.0")
+    .replaceAll("V5.12.0", "V5.14.0")
+    .replaceAll("V5.13.0", "V5.14.0")
+    .replaceAll("V5.13.1", "V5.14.0");
 }
 
 
-export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
+export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell,topbarTitle="Almoxarifado") {
   if (!respostaAlmox || !responseShell || respostaAlmox.status !== 200 || responseShell.status !== 200) {
     return new Response("Área do Almoxarifado indisponível no momento.",{status:500,headers:{"content-type":"text/plain; charset=utf-8","cache-control":"no-store"}});
   }
@@ -1007,7 +1095,8 @@ export async function integrarTelaAlmoxarifado(respostaAlmox,responseShell) {
   const topbarStart=updated.indexOf('<div class="topbar-titulo">');
   const strongStart=topbarStart>=0 ? updated.indexOf("<strong>",topbarStart) : -1;
   const strongEnd=strongStart>=0 ? updated.indexOf("</strong>",strongStart) : -1;
-  if(strongStart>=0 && strongEnd>strongStart) updated=updated.slice(0,strongStart+8)+"Almoxarifado"+updated.slice(strongEnd);
+  const tituloTopbar=escaparHtmlAlmox(topbarTitle || "Almoxarifado");
+  if(strongStart>=0 && strongEnd>strongStart) updated=updated.slice(0,strongStart+8)+tituloTopbar+updated.slice(strongEnd);
   const headers=new Headers(responseShell.headers);
   headers.delete("content-length");headers.delete("content-encoding");
   headers.set("cache-control","private, no-store");
@@ -1125,6 +1214,29 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
       updated = updated.replace(re,(whole,open,inner,close)=>open+inner+link+close);
     }
 
+  }
+
+
+  if (ehHtml && updated.includes('class="sidebar-nav"')) {
+    const userEstoque = env?.db ? await obterUsuarioLogado(request,env) : null;
+    const podeVerEstoqueImpressao = gerenteAlmox(userEstoque) ||
+      setoresDisponiveisAlmox(userEstoque).includes("DIGITAL:IMPRESSAO");
+    if (podeVerEstoqueImpressao && !updated.includes('href="/digital/estoque"')) {
+      const linkEstoque = '<a href="/digital/estoque" class="digital-estoque-nav-link"><span class="nav-icone">▣</span><span>Estoque da Impressão</span></a>';
+      let inserido = false;
+      updated = updated.replace(/(<a\b[^>]*href="\/digital\/?[^"]*"[^>]*>[\s\S]*?<\/a>)/i, (match) => {
+        inserido = true;
+        return match + linkEstoque;
+      });
+      if (!inserido) {
+        const grupo = /(<div class="nav-bloco-itens-v325">)([\s\S]*?)(<\/div>)/;
+        updated = updated.replace(grupo, (match,inicio,miolo,fim) => {
+          if (inserido) return match;
+          inserido = true;
+          return inicio + miolo + linkEstoque + fim;
+        });
+      }
+    }
   }
 
   const headers = new Headers(response.headers);
