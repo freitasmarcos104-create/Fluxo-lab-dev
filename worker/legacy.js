@@ -23661,14 +23661,27 @@ function paginaUniversidadeV321(usuario, cursos, certificados, competencias) {
     <h3>Cursos e trilhas</h3><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px">${cards || '<div class="card">Ainda não há cursos publicados. A liderança pode cadastrar o primeiro curso na área de gerenciamento.</div>'}</div>
     <p class="nota" style="margin-top:18px">O progresso é individual. A conclusão depende das aulas e, quando configurada, da avaliação do curso. Os certificados registram o nome do colaborador e o conteúdo concluído.</p>`, "Universidade Fluxo Lab", usuario);
 }
+const TITULO_CURSO_GENGIVA = "Fundamentos da Escultura Gengival em Prótese Total";
+const BASE_MATERIAL_GENGIVA = "/universidade/materiais/escultura-gengival/";
+const figurasGengiva = [
+  ["capa.webp", "Próteses totais em vista frontal"],
+  ["sulcos.webp", "Sulcos gengivais com relevo acentuado para observação"],
+  ["revisao.webp", "Vista oblíqua da escultura no Exocad"]
+];
+function figuraCursoGengiva(indice) {
+  const figura = figurasGengiva[indice];
+  if (!figura) return "";
+  return `<figure style="margin:12px 0"><img src="${BASE_MATERIAL_GENGIVA}${figura[0]}" alt="${figura[1]}" style="display:block;width:100%;max-width:640px;height:auto;border-radius:10px" loading="lazy"><figcaption class="mini">${figura[1]}</figcaption></figure>`;
+}
 function paginaCursoUniversidadeV321(usuario, curso, aulas, matricula, questoes, alternativas, aulasConcluidas, mensagem = "") {
+  const cursoGengiva = curso.titulo === TITULO_CURSO_GENGIVA;
   const concluidas = new Set(aulasConcluidas.map((x) => Number(x.aula_id)));
   const aulasHtml = aulas.map((a, i) => {
     const done = concluidas.has(Number(a.id));
     const video = urlHttpSeguraV321(a.video_url);
     const material = urlHttpSeguraV321(a.material_url);
     const conteudo = String(a.conteudo || "").trim();
-    return `<article class="card" style="margin-bottom:10px"><div class="mini">Aula ${i + 1} · ${Number(a.duracao_minutos || 0)} min ${done ? "· ✓ Concluída" : ""}</div><h3>${escapeHtml(a.titulo)}</h3><p class="nota">${escapeHtml(a.resumo || "")}</p>${matricula ? conteudo ? `<div style="white-space:pre-wrap;line-height:1.6">${escapeHtml(conteudo)}</div>` : "" : '<p class="mini">Inscreva-se para acessar o conteúdo desta aula.</p>'}${matricula && video ? `<p><a href="${escapeHtml(video)}" target="_blank" rel="noopener noreferrer">▶ Assistir vídeo / abrir aula</a></p>` : ""}${matricula && material ? `<p><a href="${escapeHtml(material)}" target="_blank" rel="noopener noreferrer">📎 Abrir material complementar</a></p>` : ""}${matricula ? done ? '<span class="badge ok">Concluída</span>' : `<form method="POST" action="/universidade/aula/${Number(a.id)}/concluir"><button type="submit">Marcar aula como concluída</button></form>` : ""}</article>`
+    return `<article class="card" style="margin-bottom:10px"><div class="mini">Aula ${i + 1} · ${Number(a.duracao_minutos || 0)} min ${done ? "· ✓ Concluída" : ""}</div><h3>${escapeHtml(a.titulo)}</h3><p class="nota">${escapeHtml(a.resumo || "")}</p>${cursoGengiva && matricula && i > 0 ? figuraCursoGengiva(i) : ""}${matricula ? conteudo ? `<div style="white-space:pre-wrap;line-height:1.6">${escapeHtml(conteudo)}</div>` : "" : '<p class="mini">Inscreva-se para acessar o conteúdo desta aula.</p>'}${matricula && video ? `<p><a href="${escapeHtml(video)}" target="_blank" rel="noopener noreferrer">▶ Assistir vídeo / abrir aula</a></p>` : ""}${matricula && material ? `<p><a href="${escapeHtml(material)}" target="_blank" rel="noopener noreferrer">📎 Abrir material complementar</a></p>` : ""}${matricula ? done ? '<span class="badge ok">Concluída</span>' : `<form method="POST" action="/universidade/aula/${Number(a.id)}/concluir"><button type="submit">Marcar aula como concluída</button></form>` : ""}</article>`
       + (matricula && curso.titulo === TITULO_CURSO_ANATOMIA && Number(a.ordem) === 5
       ? renderCheckpointAnatomia(escapeHtml) : "");
   }).join("");
@@ -23677,7 +23690,7 @@ function paginaCursoUniversidadeV321(usuario, curso, aulas, matricula, questoes,
   return layout(`<div class="cabecalho-pagina"><div><div class="mini">${escapeHtml(curso.categoria || "Curso interno")} · ${escapeHtml(curso.nivel || "Geral")}</div><h2>${escapeHtml(curso.titulo)}</h2><p class="nota">${escapeHtml(curso.descricao || "")}</p></div><a class="botao botao-sec" href="/universidade">← Universidade</a></div>
     ${mensagem ? `<div class="${mensagem.startsWith("Erro:") ? "erro" : "sucesso"}" role="status">${escapeHtml(mensagem.replace(/^Erro:\s*/, ""))}</div>` : ""}
     <div class="card" style="margin-bottom:14px"><div style="display:flex;gap:20px;flex-wrap:wrap"><div><div class="mini">Carga horária</div><strong>${Number(curso.carga_horaria_minutos || 0)} minutos</strong></div><div><div class="mini">Aulas concluídas</div><strong>${concluidas.size} / ${aulas.length}</strong></div><div><div class="mini">Progresso</div><strong>${pct}%</strong></div></div><div style="height:8px;background:var(--borda);border-radius:9px;margin-top:12px;overflow:hidden"><span style="display:block;width:${pct}%;height:8px;background:#20b8b5"></span></div>${!matricula ? `<form method="POST" action="/universidade/curso/${Number(curso.id)}/inscrever" style="margin-top:14px"><button type="submit">Inscrever-me neste curso</button></form>` : ""}${curso.codigo_certificado ? `<p class="sucesso" style="margin-top:12px">Certificado emitido: ${escapeHtml(curso.codigo_certificado)} · <a href="/universidade/certificados">ver certificados</a></p>` : ""}</div>
-    <h3>Conteúdo do curso</h3>${aulasHtml || '<div class="card">Este curso ainda não possui aulas publicadas.</div>'}${quiz}
+    ${cursoGengiva ? figuraCursoGengiva(0) : ""}<h3>Conteúdo do curso</h3>${aulasHtml || '<div class="card">Este curso ainda não possui aulas publicadas.</div>'}${quiz}
     <p class="nota" style="margin-top:18px">As aulas concluídas não podem ser desmarcadas pelo colaborador. A avaliação registra a tentativa e a nota alcançada.</p>`, "Curso · Universidade Fluxo Lab", usuario);
 }
 function paginaAdminUniversidadeV321(usuario, cursos, mensagem = "") {
@@ -23725,6 +23738,16 @@ async function rotaUniversidadeV321(request, env, url, caminho) {
   if (isCadastro(usuario)) return textResponse("Acesso restrito ao módulo Cadastro.", 403);
   const metodo = request.method;
   const agora = (/* @__PURE__ */ new Date()).toISOString();
+  if (metodo === "GET" && caminho.startsWith(BASE_MATERIAL_GENGIVA)) {
+    const arquivo = caminho.slice(BASE_MATERIAL_GENGIVA.length);
+    if (arquivo !== "apostila.pdf" && !figurasGengiva.some(([nome]) => nome === arquivo)) return textResponse("Material não encontrado.", 404);
+    const objeto = await env.DOWNLOADS.get("universidade/escultura-gengival/" + arquivo);
+    if (!objeto) return textResponse("Material não encontrado.", 404);
+    return new Response(objeto.body, { headers: {
+      "Content-Type": arquivo === "apostila.pdf" ? "application/pdf" : "image/webp",
+      "Cache-Control": "private, max-age=300", "X-Content-Type-Options": "nosniff"
+    } });
+  }
   if (metodo === "GET" && caminho === "/universidade") {
     const cursos = (await env.db.prepare(`SELECT c.*,(SELECT COUNT(*) FROM universidade_aulas_v321 a WHERE a.curso_id=c.id AND a.ativo=1) AS total_aulas,(SELECT COUNT(*) FROM universidade_questoes_v321 q WHERE q.curso_id=c.id AND q.ativo=1) AS total_questoes,m.id AS matricula_id,(SELECT COUNT(*) FROM universidade_aulas_concluidas_v321 p JOIN universidade_aulas_v321 a ON a.id=p.aula_id WHERE p.matricula_id=m.id AND a.ativo=1) AS aulas_concluidas,cert.codigo AS codigo_certificado FROM universidade_cursos_v321 c LEFT JOIN universidade_matriculas_v321 m ON m.curso_id=c.id AND m.usuario_id=? LEFT JOIN universidade_certificados_v321 cert ON cert.matricula_id=m.id WHERE c.ativo=1 ORDER BY c.categoria COLLATE NOCASE,c.titulo COLLATE NOCASE`).bind(usuario.id).all()).results || [];
     const certificados = (await env.db.prepare(`SELECT * FROM universidade_certificados_v321 WHERE usuario_id=? ORDER BY emitido_em DESC`).bind(usuario.id).all()).results || [];
