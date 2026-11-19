@@ -46,7 +46,7 @@ export function deveBloquearRotaAlmoxarife(isAlmoxarife, pathname, method) {
   // mas não recebe rotas de produção, relatórios ou gestão operacional.
   const rotasColaborador = [
     "/meu-espaco", "/comunicacao", "/agenda-tarefas", "/notificacoes",
-    "/emblemas", "/universidade", "/meu-perfil", "/trabalhos-clinica", "/minhas-notas", "/mensagens",
+    "/emblemas", "/universidade", "/meu-perfil", "/minhas-notas", "/mensagens",
     "/digital/chat-equipe", "/api/digital/chat-equipe"
   ];
   if (rotasColaborador.includes(path)) return false;
@@ -1215,7 +1215,6 @@ export async function injetarLinkAlmoxarifado(response, request, env) {
             '<a href="/emblemas"><span class="nav-icone">🏆</span><span>Minha coleção de emblemas</span></a>',
             '<a href="/universidade"><span class="nav-icone">🎓</span><span>Universidade Fluxo Lab</span></a>',
             '<a href="/meu-perfil"><span class="nav-icone">◉</span><span>Meu perfil</span></a>',
-            '<a href="/trabalhos-clinica"><span class="nav-icone">▤</span><span>Trabalhos da Clínica</span></a>',
             '<a href="/minhas-notas"><span class="nav-icone">✎</span><span>Minhas anotações</span></a>'
           ].join("");
           return open + colaborador + close;

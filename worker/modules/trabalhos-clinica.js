@@ -6,6 +6,10 @@ export const tiposClinica = [
 const rota = "/trabalhos-clinica";
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+export function podeAcessarClinica(usuario) {
+  return usuario?.perfil === "ADMINISTRADOR";
+}
+
 export async function trabalhosClinica(request, db, usuario, { layout, htmlResponse, escapeHtml }) {
   const url = new URL(request.url);
   const pagina = (conteudo, status = 200) => {
@@ -14,6 +18,7 @@ export async function trabalhosClinica(request, db, usuario, { layout, htmlRespo
     return resposta;
   };
   const erro = (mensagem, status) => pagina(`<p class="erro">${mensagem}</p><a href="${rota}">Voltar à Clínica</a>`, status);
+  if (!podeAcessarClinica(usuario)) return pagina('<p class="erro">Acesso exclusivo do administrador.</p>', 403);
   if (request.method === "POST") {
     if (request.headers.get("Origin") !== url.origin) return erro("Origem inválida.", 403);
     const form = await request.formData();

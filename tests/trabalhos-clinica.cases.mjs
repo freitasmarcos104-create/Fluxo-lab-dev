@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { readFileSync } from "node:fs";
 import { trabalhosClinica, tiposClinica } from "../worker/modules/trabalhos-clinica.js";
 
-test("Cada conta vê e atualiza seus casos; repetir o envio não duplica o caso", async () => {
+test("Cada administrador vê e atualiza seus casos; repetir o envio não duplica o caso", async () => {
   const sql = new DatabaseSync(":memory:");
   sql.exec("CREATE TABLE usuarios(id INTEGER PRIMARY KEY); INSERT INTO usuarios VALUES (1),(2)");
   sql.exec(readFileSync(new URL("../worker/migrations/0006_trabalhos_clinica.sql", import.meta.url), "utf8"));
@@ -18,7 +18,7 @@ test("Cada conta vê e atualiza seus casos; repetir o envio não duplica o caso"
   const render = {layout: s => s, htmlResponse: (s,status) => new Response(s,{status}), escapeHtml: s => s.replaceAll("<","&lt;")};
   const chamar = (id, dados) => trabalhosClinica(new Request(origin + "/trabalhos-clinica", dados && {
     method:"POST", headers:{Origin:origin}, body:new URLSearchParams(dados)
-  }), db, {id}, render);
+  }), db, {id, perfil:"ADMINISTRADOR"}, render);
   const novo = {acao:"criar",chave:crypto.randomUUID(),referencia:"Caso <teste>",tipo:"Onlay",prazo:"2026-11-18"};
   assert.equal(tiposClinica.length,9);
   assert.equal((await chamar(1,{...novo,prazo:"2026-02-30"})).status,400);
@@ -36,4 +36,15 @@ test("Cada conta vê e atualiza seus casos; repetir o envio não duplica o caso"
   assert.equal((await chamar(1,{...status,concluido:"0"})).status,303);
   assert.match(await (await chamar(1)).text(),/Marcar como concluído/);
   sql.close();
+});
+
+test("A Clínica bloqueia leitura e escrita para os demais perfis antes de acessar o banco", async () => {
+  const render = {layout: s => s, htmlResponse: (s,status) => new Response(s,{status})};
+  for (const perfil of ["COORDENADOR","GERENCIA","CADASTRO","FUNCIONARIO",null]) {
+    for (const method of ["GET","POST"]) {
+      const request = new Request("https://example.test/trabalhos-clinica",{method});
+      const resposta = await trabalhosClinica(request,null,{id:1,perfil},render);
+      assert.equal(resposta.status,403);
+    }
+  }
 });
