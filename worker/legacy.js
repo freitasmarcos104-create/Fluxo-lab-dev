@@ -1,3 +1,5 @@
+import { obterUsuarioLogado } from "./core/auth.js";
+import { dataCurtaLaboratorio as dataCurtaComunicacaoV322 } from "./core/data-local.js";
 import { cadastrarCursoAnatomia, renderCheckpointAnatomia, TITULO_CURSO_ANATOMIA } from "./modules/curso-anatomia.js";
 // FLUXO LAB V5.9.0 — EDITOR DE ANOTAÇÕES FORMATADAS
 import { renderRichNoteValue, countRichNoteCharacters, serializeRichNoteValue } from "./modules/rich-notes.js";
@@ -569,95 +571,6 @@ function lerCookie(request, nome) {
     }
   }
   return null;
-}
-async function obterUsuarioLogado(request, env) {
-  const token = lerCookie(
-    request,
-    "fluxo_session"
-  );
-  if (!token) {
-    return null;
-  }
-  const tokenHash = await sha256(token);
-  const agora = (/* @__PURE__ */ new Date()).toISOString();
-  return await env.db.prepare(`
-
-    SELECT
-      u.id,
-      u.nome,
-      u.usuario,
-      u.setor,
-      u.area_producao,
-      u.setor_convencional,
-      u.perfil,
-      u.ativo,
-      u.excluido,
-
-      COALESCE((
-        SELECT GROUP_CONCAT(ua.area, '|')
-        FROM usuario_areas ua
-        WHERE ua.usuario_id = u.id AND ua.ativo = 1
-      ), '') AS areas_v31,
-
-      COALESCE((
-        SELECT GROUP_CONCAT(us.area || ':' || us.setor, '|')
-        FROM usuario_setores us
-        WHERE us.usuario_id = u.id AND us.ativo = 1
-      ), '') AS setores_v31,
-
-      CASE
-
-        WHEN u.perfil IN (
-          'ADMINISTRADOR',
-          'COORDENADOR'
-        )
-
-        THEN (
-
-          SELECT
-            COUNT(*)
-
-          FROM avisos_coordenador a
-
-          WHERE
-            a.lido = 0
-            AND a.encerrado = 0
-        )
-
-        ELSE 0
-
-      END AS avisos_nao_lidos,
-
-      CASE
-        WHEN u.perfil = 'CADASTRO' THEN 0
-        ELSE (
-          SELECT COUNT(*)
-          FROM mensagens_privadas mp
-          WHERE mp.destinatario_id = u.id
-            AND mp.lido = 0
-        )
-      END AS mensagens_nao_lidas
-
-    FROM sessoes s
-
-    INNER JOIN usuarios u
-      ON u.id = s.usuario_id
-
-    WHERE
-      s.token_hash = ?
-
-      AND s.expira_em > ?
-
-      AND u.ativo = 1
-
-      AND u.excluido = 0
-
-    LIMIT 1
-
-  `).bind(
-    tokenHash,
-    agora
-  ).first();
 }
 async function registrarAuditoria(env, autorId, alvoId, acao, detalhes) {
   await env.db.prepare(`
@@ -23935,13 +23848,6 @@ function rotuloStatusComunicacaoV322(status) {
   };
   return mapa[String(status || "").toUpperCase()] || String(status || "—");
 }
-function dataCurtaComunicacaoV322(valor) {
-  if (!valor) return "—";
-  const s = String(valor);
-  const d = s.slice(0, 10);
-  const p = d.split("-");
-  return p.length === 3 ? `${p[2]}/${p[1]}/${p[0]}` : s;
-}
 function muralVisivelComunicacaoV322(usuario, item) {
   if (isCoord(usuario)) return true;
   const tipo = String(item.audiencia_tipo || "TODOS").toUpperCase();
@@ -24192,11 +24098,12 @@ async function rotaNotificacoesV324(request, env, url, caminho) {
     if (metodo === "GET" && caminho === "/notificacoes") {
       await gerarLembretesPrazoV324(env, usuario);
       const filtro = url.searchParams.get("filtro") === "NAO_LIDAS" ? "NAO_LIDAS" : "TODAS";
-      const naoLidas = await env.db.prepare(`SELECT COUNT(*) AS n FROM notificacoes_central_v324 WHERE usuario_id=? AND lido_em IS NULL`).bind(Number(usuario.id)).first();
-      const total = await env.db.prepare(`SELECT COUNT(*) AS n FROM notificacoes_central_v324 WHERE usuario_id=?`).bind(Number(usuario.id)).first();
       const sql = filtro === "NAO_LIDAS" ? `SELECT * FROM notificacoes_central_v324 WHERE usuario_id=? AND lido_em IS NULL ORDER BY criado_em DESC,id DESC LIMIT 100` : `SELECT * FROM notificacoes_central_v324 WHERE usuario_id=? ORDER BY CASE WHEN lido_em IS NULL THEN 0 ELSE 1 END,criado_em DESC,id DESC LIMIT 100`;
-      const itens = (await env.db.prepare(sql).bind(Number(usuario.id)).all()).results || [];
-      const response = htmlResponse(paginaNotificacoesV324(usuario, { nao_lidas: naoLidas?.n || 0, total: total?.n || 0, itens }, filtro));
+      const [contagem, lista] = await env.db.batch([
+        env.db.prepare("SELECT COUNT(*) AS total, COUNT(*) - COUNT(lido_em) AS nao_lidas FROM notificacoes_central_v324 WHERE usuario_id=?").bind(Number(usuario.id)),
+        env.db.prepare(sql).bind(Number(usuario.id))
+      ]);
+      const response = htmlResponse(paginaNotificacoesV324(usuario, { ...contagem.results[0], itens: lista.results || [] }, filtro));
       response.headers.set("Cache-Control", "private, no-store");
       return response;
     }
