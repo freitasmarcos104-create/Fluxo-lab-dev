@@ -40,19 +40,9 @@ export async function trabalhosClinica(request, db, usuario, { layout, htmlRespo
         .bind(seguinte, Number(seguinte===8), usuario.id, id, atual).run();
       if (!resultado.meta.changes) return erro("O caso está indisponível ou a etapa já foi atualizada. Volte à Clínica para conferir.", 409);
     } else if (campo("acao") === "criar") {
-      const paciente = Number(campo("paciente")), tipo = campo("tipo"), prazo = campo("prazo");
-      const dentes = new Set(form.getAll("fdi"));
-      const arcadas = form.getAll("arcada");
-      if ([...dentes].some(d => !/^[1-4][1-8]$/.test(d)) || arcadas.some(a => !["superior","inferior"].includes(a)))
-        return erro("Seleção FDI inválida.", 400);
-      for (const arcada of arcadas) {
-        for (const q of arcada === "superior" ? [1,2] : [3,4]) {
-          for (let i=1; i<=8; i++) dentes.add(String(q*10+i));
-        }
-      }
-      if (!dentes.size) return erro("Selecione ao menos um dente ou uma arcada.", 400);
+      const paciente = Number(campo("paciente")), prazo = campo("prazo");
       const observacoes = campo("observacoes"), chave = campo("chave");
-      if (!Number.isSafeInteger(paciente) || paciente < 1 || !tiposClinica.includes(tipo) || observacoes.length > 1000 || !uuid.test(chave))
+      if (!Number.isSafeInteger(paciente) || paciente < 1 || observacoes.length > 1000 || !uuid.test(chave))
         return erro("Confira o paciente, o tipo e as observações do trabalho.", 400);
       if (prazo) {
         const data = new Date(prazo + "T00:00:00Z");
@@ -61,9 +51,28 @@ export async function trabalhosClinica(request, db, usuario, { layout, htmlRespo
       }
       const registro = await db.prepare("SELECT nome FROM clinica_pacientes WHERE id=? AND usuario_id=?").bind(paciente,usuario.id).first();
       if (!registro) return erro("Paciente não encontrado.",404);
-      await db.prepare(`INSERT INTO trabalhos_clinica (usuario_id,chave,referencia,tipo,prazo,observacoes,paciente_id,dentes)
-        VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(usuario_id,chave) DO NOTHING`)
-        .bind(usuario.id, chave, registro.nome, tipo, prazo || null, observacoes, paciente, [...dentes].sort().join(", ")).run();
+      const ids = form.has("item") ? form.getAll("item") : ["0"];
+      if (new Set(ids).size !== ids.length || ids.some(id => !/^(0|[1-9][0-9]{0,8})$/.test(id))) return erro("Lista de trabalhos inválida.",400);
+      const insercoes = [];
+      for (const id of ids) {
+        const sufixo = id === "0" ? "" : "_" + id;
+        const tipo = campo("tipo" + sufixo);
+        if (!tiposClinica.includes(tipo)) return erro("Selecione o tipo de cada trabalho.",400);
+        const dentes = new Set(form.getAll("fdi" + sufixo));
+        const arcadas = form.getAll("arcada" + sufixo);
+        if ([...dentes].some(d => !/^[1-4][1-8]$/.test(d)) || arcadas.some(a => !["superior","inferior"].includes(a)))
+          return erro("Seleção FDI inválida.", 400);
+        for (const arcada of arcadas) {
+          for (const q of arcada === "superior" ? [1,2] : [3,4]) {
+            for (let i=1; i<=8; i++) dentes.add(String(q*10+i));
+          }
+        }
+        if (!dentes.size) return erro("Selecione ao menos um dente ou uma arcada.", 400);
+        insercoes.push(db.prepare(`INSERT INTO trabalhos_clinica (usuario_id,chave,referencia,tipo,prazo,observacoes,paciente_id,dentes)
+          VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(usuario_id,chave) DO NOTHING`)
+          .bind(usuario.id, id === "0" ? chave : chave + ":" + id, registro.nome, tipo, prazo || null, observacoes, paciente, [...dentes].sort().join(", ")));
+      }
+      await db.batch(insercoes);
     } else return erro("Ação inválida.", 400);
     return new Response(null, {status:303, headers:{Location:destino, "Cache-Control":"private, no-store"}});
   }
@@ -73,8 +82,14 @@ export async function trabalhosClinica(request, db, usuario, { layout, htmlRespo
   const {results} = await db.prepare("SELECT id,referencia,tipo,prazo,observacoes,dentes,andamento,paciente_id FROM trabalhos_clinica WHERE usuario_id=? AND id<? ORDER BY id DESC LIMIT 21")
     .bind(usuario.id, antes).all();
   const pacientes = await db.prepare("SELECT id,nome FROM clinica_pacientes WHERE usuario_id=? ORDER BY nome COLLATE NOCASE,id").bind(usuario.id).all();
+  function descricaoArcada(dentes) {
+    const superior = /(?:^|, )[12][1-8]/.test(dentes);
+    const inferior = /(?:^|, )[34][1-8]/.test(dentes);
+    if (superior && inferior) return "Superior e inferior";
+    return superior ? "Superior" : inferior ? "Inferior" : "";
+  }
   const itens = results.slice(0,20).map(item => `<article class="card"><h3>${escapeHtml(item.referencia)}</h3>
-    <p>${escapeHtml(item.tipo)}</p><p>${item.paciente_id ? "Paciente #" + item.paciente_id : "Referência anterior"} · FDI: ${escapeHtml(item.dentes || "sem registro")}</p>
+    <p><strong>${escapeHtml(item.tipo)}</strong> · ${descricaoArcada(item.dentes)}</p><p>${item.paciente_id ? "Paciente #" + item.paciente_id : "Referência anterior"} · FDI: ${escapeHtml(item.dentes || "sem registro")}</p>
     ${item.prazo ? `<p>Prazo de entrega: ${escapeHtml(item.prazo.split("-").reverse().join("/"))}</p>` : ""}
     ${item.observacoes ? `<p style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(item.observacoes)}</p>` : ""}
     ${progresso(item)}</article>`).join("");
