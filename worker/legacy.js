@@ -5795,7 +5795,6 @@ function layout(conteudo, titulo = "Fluxo Lab", usuario = null) {
           <span class="nav-icone">◉</span>
           <span>Meu perfil</span>
         </a>
-        ${podeAcessarClinica(usuario) ? '<a href="/trabalhos-clinica"><span class="nav-icone">▤</span><span>Trabalhos da Clínica</span></a>' : ""}
         <a href="/minhas-notas">
           <span class="nav-icone">✎</span>
           <span>Minhas anotações</span>
@@ -5856,6 +5855,7 @@ function layout(conteudo, titulo = "Fluxo Lab", usuario = null) {
 
         ${cadastro}
         ${digital}
+        ${podeAcessarClinica(usuario) ? '<a href="/trabalhos-clinica"><span class="nav-icone">▤</span><span>Trabalhos da Clínica</span></a>' : ""}
         ${chatEquipeDigital}
         ${concluidosHojeDigital}
         ${arquivosDigitais}
