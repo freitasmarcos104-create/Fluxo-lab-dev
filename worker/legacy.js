@@ -1,3 +1,4 @@
+import { trabalhosClinica } from "./modules/trabalhos-clinica.js";
 import { obterUsuarioLogado } from "./core/auth.js";
 import { dataCurtaLaboratorio as dataCurtaComunicacaoV322 } from "./core/data-local.js";
 import { cadastrarCursoAnatomia, renderCheckpointAnatomia, TITULO_CURSO_ANATOMIA } from "./modules/curso-anatomia.js";
@@ -5794,6 +5795,7 @@ function layout(conteudo, titulo = "Fluxo Lab", usuario = null) {
           <span class="nav-icone">◉</span>
           <span>Meu perfil</span>
         </a>
+        <a href="/trabalhos-clinica"><span class="nav-icone">▤</span><span>Trabalhos da Clínica</span></a>
         <a href="/minhas-notas">
           <span class="nav-icone">✎</span>
           <span>Minhas anotações</span>
@@ -26026,6 +26028,11 @@ async function rotearV31Base(request, env, url, caminho) {
       throw erro;
     }
     return redirect(`/meu-perfil?ok=${encodeURIComponent(valor ? "Avatar atualizado." : "Avatar removido.")}`);
+  }
+  if (caminho === "/trabalhos-clinica") {
+    const usuario = await obterUsuarioLogado(request, env);
+    if (!usuario) return redirect("/");
+    return trabalhosClinica(request, env.db, usuario, { layout, escapeHtml, htmlResponse });
   }
   if (metodo === "GET" && caminho === "/minhas-notas") {
     const usuario = await obterUsuarioLogado(request, env);
