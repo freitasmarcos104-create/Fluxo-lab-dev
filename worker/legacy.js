@@ -23706,8 +23706,17 @@ function paginaAdminUniversidadeV321(usuario, cursos, mensagem = "") {
     <section class="card" style="margin-bottom:16px"><h3>Novo curso</h3><form method="POST" action="/universidade/admin/cursos" style="display:grid;gap:8px"><label>Nome do curso<input name="titulo" maxlength="140" required></label><label>Descrição<textarea name="descricao" rows="3" maxlength="2000"></textarea></label><div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:8px"><label>Categoria<input name="categoria" maxlength="80" placeholder="Ex.: CAD/CAM, Impressão 3D"></label><label>Nível<select name="nivel"><option>Básico</option><option>Intermediário</option><option>Avançado</option><option>Geral</option></select></label><label>Carga horária (minutos)<input name="carga_horaria_minutos" type="number" min="1" max="100000" value="60" required></label><label>Nota mínima (%)<input name="nota_aprovacao" type="number" min="1" max="100" value="70" required></label></div><label>Competências relacionadas (separe por vírgulas)<input name="competencias" maxlength="500" placeholder="Ex.: Exocad, Anatomia dental digital, Chitubox"></label><button type="submit">Cadastrar curso</button></form></section><h3>Cursos cadastrados</h3>${itens || '<div class="card">Nenhum curso cadastrado ainda.</div>'}`, "Gerenciar Universidade", usuario);
 }
 function paginaCertificadosUniversidadeV321(usuario, lista) {
-  const rows = lista.map((c) => `<tr><td>${escapeHtml(c.curso_nome)}</td><td>${Number(c.carga_horaria_minutos)} min</td><td>${escapeHtml(c.emitido_em)}</td><td><strong>${escapeHtml(c.codigo)}</strong></td></tr>`).join("");
-  return layout(`<div class="cabecalho-pagina"><div><h2>🏅 Meus certificados</h2><p class="nota">Certificados emitidos após cumprir as aulas e obter aprovação, quando houver avaliação.</p></div><a class="botao botao-sec" href="/universidade">← Universidade</a></div><div class="tabela-wrap"><table><thead><tr><th>Curso</th><th>Carga horária</th><th>Emissão</th><th>Código</th></tr></thead><tbody>${rows || '<tr><td colspan="4">Você ainda não possui certificados.</td></tr>'}</tbody></table></div>`, "Meus certificados", usuario);
+  const cards = lista.map(c => {
+    const url = "/universidade/certificados/" + Number(c.id) + "/imagem.svg";
+    return `<article class="card"><h3>${escapeHtml(c.curso_snapshot)}</h3><img style="width:100%;max-width:840px;height:auto" src="${url}" alt="Certificado de ${escapeHtml(c.curso_snapshot)}"><p><a class="botao botao-sec" href="${url}" download="certificado-${Number(c.id)}.svg">Baixar certificado</a></p></article>`;
+  }).join("");
+  return layout(`<div class="cabecalho-pagina"><h2>🏅 Meus certificados</h2><a href="/universidade">← Universidade</a></div>${cards || '<p class="nota">Você ainda não possui certificados.</p>'}`, "Meus certificados", usuario);
+}
+function imagemCertificadoUniversidade(c) {
+  const linha = (y, valor, tamanho, cor = "#193452") => `<text x="520" y="${y}" text-anchor="middle" fill="${cor}" font-size="${tamanho}" font-family="Georgia,serif">${escapeHtml(String(valor))}</text>`;
+  const ajustar = (valor, limite) => Math.min(limite, 1450 / Math.max(1, Array.from(valor).length));
+  const data = new Date(c.emitido_em).toLocaleDateString("pt-BR", {timeZone:"America/Sao_Paulo"});
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1040 640" width="1040" height="640"><title>Certificado de conclusão</title><rect width="1040" height="640" fill="#fffdf6"/><rect x="20" y="20" width="1000" height="600" fill="none" stroke="#ae8a49" stroke-width="3"/><rect x="30" y="30" width="980" height="580" fill="none" stroke="#ae8a49"/>${linha(110,"UNIVERSIDADE FLUXO LAB",24)}${linha(205,"Certificado de conclusão",53)}${linha(275,"Certificamos que",22)}${linha(338,c.nome_snapshot,ajustar(c.nome_snapshot,42))}${linha(388,"concluiu o curso",22)}${linha(446,c.curso_snapshot,ajustar(c.curso_snapshot,34))}${linha(514,c.carga_horaria_minutos+" minutos  ·  "+data,24)}${linha(570,c.codigo,17,"#766038")}</svg>`;
 }
 function paginaCompetenciasUniversidadeV321(usuario, lista) {
   const rows = lista.map((c) => `<tr><td>${escapeHtml(c.nome)}</td><td>${escapeHtml(c.cursos || "—")}</td><td>${Number(c.concluida) ? '<span class="badge ok">Desenvolvida</span>' : '<span class="badge neutro">Em desenvolvimento</span>'}</td></tr>`).join("");
@@ -23725,9 +23734,12 @@ async function universidadeEmitirSeElegivelV321(env, cursoId, matriculaId, usuar
     const tentativa = await env.db.prepare(`SELECT aprovou FROM universidade_tentativas_v321 WHERE matricula_id=? ORDER BY id DESC LIMIT 1`).bind(matriculaId).first();
     if (!tentativa || !Number(tentativa.aprovou)) return false;
   }
-  const codigo = "const FLUXO_CACHE='fluxo-lab-v5.9.0';\nself.addEventListener('install',event=>{event.waitUntil(self.skipWaiting());});\nself.addEventListener('activate',event=>{event.waitUntil(self.clients.claim());});\nself.addEventListener('fetch',event=>{const req=event.request;if(req.method!=='GET')return;const url=new URL(req.url);if(url.origin!==self.location.origin)return;event.respondWith(fetch(req).catch(()=>new Response('Sem conexão com a internet. Conecte-se para utilizar o Fluxo Lab.',{status:503,headers:{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'}})));});";
-  const certificadoInseridoV324 = await env.db.prepare(`INSERT OR IGNORE INTO universidade_certificados_v321 (matricula_id,usuario_id,curso_id,codigo,nome_snapshot,curso_snapshot,carga_horaria_minutos,emitido_em) VALUES (?,?,?,?,?,?,?,?)`).bind(matriculaId, usuario.id, cursoId, codigo, usuario.nome, curso.titulo, curso.carga_horaria_minutos, (/* @__PURE__ */ new Date()).toISOString()).run();
-  await env.db.prepare(`UPDATE universidade_matriculas_v321 SET status='CONCLUIDO',concluido_em=COALESCE(concluido_em,?) WHERE id=?`).bind((/* @__PURE__ */ new Date()).toISOString(), matriculaId).run();
+  const agora = new Date().toISOString();
+  const codigo = "FLU-" + crypto.randomUUID();
+  const [certificadoInseridoV324] = await env.db.batch([
+    env.db.prepare(`INSERT INTO universidade_certificados_v321 (matricula_id,usuario_id,curso_id,codigo,nome_snapshot,curso_snapshot,carga_horaria_minutos,emitido_em) VALUES (?,?,?,?,?,?,?,COALESCE((SELECT concluido_em FROM universidade_matriculas_v321 WHERE id=?),?)) ON CONFLICT(matricula_id) DO NOTHING`).bind(matriculaId, usuario.id, cursoId, codigo, usuario.nome, curso.titulo, curso.carga_horaria_minutos, matriculaId, agora),
+    env.db.prepare(`UPDATE universidade_matriculas_v321 SET status='CONCLUIDO',concluido_em=COALESCE(concluido_em,?) WHERE id=?`).bind(agora, matriculaId)
+  ]);
   if (Number(certificadoInseridoV324.meta?.changes || 0) > 0) await registrarNotificacaoCentralV324(env, usuario.id, "CERTIFICADO", "Certificado conquistado", `Seu certificado do curso “${curso.titulo}” foi emitido.`, "/universidade/certificados", `CERTIFICADO:${cursoId}:${matriculaId}`);
   return true;
 }
@@ -23887,7 +23899,16 @@ async function rotaUniversidadeV321(request, env, url, caminho) {
     const mensagem = aprovou ? `Aprovado: ${nota}%.` : `Nota ${nota}%. Você precisa de ${Number(curso.nota_aprovacao || 70)}% para aprovação. Revise o conteúdo e tente novamente.`;
     return redirect("/universidade/curso/" + id + "?ok=" + encodeURIComponent(mensagem));
   }
+  const imagem = caminho.match(/^\/universidade\/certificados\/(\d+)\/imagem\.svg$/);
+  if (metodo === "GET" && imagem) {
+    const c = await env.db.prepare("SELECT * FROM universidade_certificados_v321 WHERE id=? AND usuario_id=?").bind(Number(imagem[1]),usuario.id).first();
+    if (!c) return textResponse("Certificado não encontrado.",404);
+    return new Response(imagemCertificadoUniversidade(c), {headers:{"Content-Type":"image/svg+xml; charset=utf-8","Cache-Control":"private, no-store","X-Content-Type-Options":"nosniff","Content-Security-Policy":"default-src 'none'"}});
+  }
   if (metodo === "GET" && caminho === "/universidade/certificados") {
+    const pendentes = await env.db.prepare(`SELECT m.id,m.curso_id FROM universidade_matriculas_v321 m WHERE m.usuario_id=? AND m.status='CONCLUIDO' AND NOT EXISTS(SELECT 1 FROM universidade_certificados_v321 c WHERE c.matricula_id=m.id)`).bind(usuario.id).all();
+    for (const m of pendentes.results || []) await universidadeEmitirSeElegivelV321(env, m.curso_id, m.id, usuario);
+    await env.db.prepare("UPDATE universidade_certificados_v321 SET codigo='FLU-' || lower(hex(randomblob(16))) WHERE usuario_id=? AND codigo LIKE 'const FLUXO_CACHE=%'").bind(usuario.id).run();
     const lista = (await env.db.prepare(`SELECT * FROM universidade_certificados_v321 WHERE usuario_id=? ORDER BY emitido_em DESC`).bind(usuario.id).all()).results || [];
     return htmlResponse(paginaCertificadosUniversidadeV321(usuario, lista));
   }
