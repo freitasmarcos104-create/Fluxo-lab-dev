@@ -1,4 +1,4 @@
-const etapas = ["CAD/CAM", "Fatiamento", "Impressão", "Acabamento"];
+export const etapas = ["CAD/CAM", "Fatiamento", "Impressão", "Acabamento"];
 export const estilos = `<style>
 .cl-form{max-width:760px}.cl-form fieldset{margin:1rem 0;border:1px solid #61808a;border-radius:12px;padding:14px}.cl-form legend{font-weight:700;padding:0 6px}
 .cl-par{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,275px),1fr));gap:12px}.cl-par fieldset{min-width:0;margin:.6rem 0}
@@ -84,10 +84,13 @@ export function ficha(pacientes, selecionado, tipos, escapar) {
 }
 
 export function progresso(item) {
+  if (item.excluido_em) return "<strong>Trabalho excluído</strong>";
+  if (item.entregue_em) return "<strong>✓ Entregue</strong>";
   const n = item.andamento, atual = Math.floor(n/2);
   const acao = n === 8 ? "Reabrir acabamento" : (n%2 ? "Concluir " : "Iniciar ") + etapas[atual];
   const passos = etapas.map((etapa,i) => `<li ${i===atual ? 'aria-current="step"' : ""}>${i<atual ? "✓ " : ""}${etapa}</li>`).join("");
-  return `<ol class="cl-fluxo" aria-label="Etapas do trabalho">${passos}</ol><p>${n===8 ? "Trabalho concluído" : (n%2 ? "Em execução" : "Aguardando início") + " · " + etapas[atual]}</p>
+  return `<ol class="cl-fluxo" aria-label="Etapas do trabalho">${passos}</ol><p>${n===8 ? "Acabamento concluído · Aguardando entrega" : (n%2 ? "Em execução" : "Aguardando início") + " · " + etapas[atual]}</p>
+    ${n === 8 ? `<form method="post"><input type="hidden" name="acao" value="entregar"><input type="hidden" name="id" value="${item.id}"><button class="botao-verde cl-concluir">Registrar entrega</button></form>` : ""}
     <form method="post"><input type="hidden" name="acao" value="etapa"><input type="hidden" name="id" value="${item.id}">
     <input type="hidden" name="atual" value="${n}"><button class="botao-bloco ${n%2 ? "botao-verde cl-concluir" : "cl-iniciar"}">${acao}</button></form>`;
 }

@@ -1,3 +1,4 @@
+import { gerirTrabalho } from "../worker/modules/gestao-trabalho.js";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
@@ -9,6 +10,7 @@ test("Cada administrador vê e atualiza seus casos; repetir o envio não duplica
   sql.exec("CREATE TABLE usuarios(id INTEGER PRIMARY KEY); INSERT INTO usuarios VALUES (1),(2)");
   sql.exec(readFileSync(new URL("../worker/migrations/0006_trabalhos_clinica.sql", import.meta.url), "utf8"));
   sql.exec(readFileSync(new URL("../worker/migrations/0007_clinica_pacientes.sql", import.meta.url),"utf8"));
+  sql.exec(readFileSync(new URL("../worker/migrations/0008_clinica_entrega_historico.sql", import.meta.url),"utf8"));
   const db = {batch: statements => statements.map(s => s.run()), prepare(query) {
     const stmt = sql.prepare(query);
     return {bind(...args) { return {
@@ -43,7 +45,7 @@ test("Cada administrador vê e atualiza seus casos; repetir o envio não duplica
     assert.equal((await chamar(1,{...status,atual})).status,303);
     assert.equal((await chamar(1,{...status,atual})).status,409);
   }
-  assert.match(await (await chamar(1)).text(),/Trabalho concluído/);
+  assert.match(await (await chamar(1)).text(),/Aguardando entrega/);
   assert.equal((await chamar(1,{...status,atual:8})).status,303);
   assert.match(await (await chamar(1)).text(),/Concluir Acabamento/);
   const lote = new URLSearchParams({...novo,chave:crypto.randomUUID(),fdi:"21",arcada:"superior",tipo:tiposClinica[0]});
@@ -65,6 +67,16 @@ test("Cada administrador vê e atualiza seus casos; repetir o envio não duplica
   lote.set("fdi_2","99");
   assert.equal((await chamar(1,lote)).status,400);
   assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM trabalhos_clinica").get().n,4);
+  assert.equal((await chamar(1,{acao:"entregar",id:"1"})).status,409);
+  await chamar(1,{...status,atual:7});
+  assert.equal((await chamar(2,{acao:"entregar",id:"1"})).status,409);
+  assert.equal((await chamar(1,{acao:"entregar",id:"1"})).status,303);
+  assert.equal((await chamar(1,{acao:"entregar",id:"1"})).status,409);
+  assert.equal((await chamar(1,{...status,atual:8})).status,409);
+  assert.equal((await chamar(2,{acao:"excluir",id:"1"})).status,409);
+  assert.equal((await chamar(1,{acao:"excluir",id:"1"})).status,303);
+  assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM clinica_eventos WHERE trabalho_id=1 AND evento IN ('entregue','excluido')").get().n,2);
+  assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM trabalhos_clinica WHERE excluido_em IS NULL").get().n,3);
   sql.close();
 });
 
@@ -77,4 +89,28 @@ test("A Clínica bloqueia leitura e escrita para os demais perfis antes de acess
       assert.equal(resposta.status,403);
     }
   }
+});
+
+test("Gestão de trabalhos exige administrador, separa áreas e preserva o histórico",async()=>{
+  const sql=new DatabaseSync(":memory:");
+  sql.exec(`CREATE TABLE trabalhos(id INTEGER PRIMARY KEY,paciente,excluido DEFAULT 0,arquivado,excluido_em,excluido_por,motivo_exclusao);
+    CREATE TABLE trabalhos_convencionais(id INTEGER PRIMARY KEY,paciente,excluido DEFAULT 0);
+    CREATE TABLE historico(trabalho_id,usuario_id,acao,detalhes,criado_em);
+    CREATE TABLE auditoria_convencional(trabalho_id,acao,valor_anterior,valor_novo,motivo,realizado_por,criado_em);
+    INSERT INTO trabalhos(id,paciente) VALUES(1,'Teste');
+    INSERT INTO trabalhos_convencionais(id,paciente) VALUES(1,'Outro');`);
+  const db={prepare(q){const st=sql.prepare(q);return {bind(...args){return {first:()=>st.get(...args),run:()=>({meta:st.run(...args)})};}};},
+    batch(stmts){return stmts.map(st=>st.run());}};
+  const origem="https://example.test";
+  const chamar=(perfil,area,dados)=>gerirTrabalho(new Request(origem,{method:"POST",headers:{Origin:origem},body:new URLSearchParams(dados)}),db,{id:1,perfil},area,1,{redirect:()=>new Response(null,{status:303})});
+  for (const area of ["digital","convencional"]) {
+    const excluir={acao:"excluir",motivo:"Cadastro duplicado"};
+    assert.equal((await chamar("COORDENADOR",area,excluir)).status,403);
+    assert.equal((await chamar("ADMINISTRADOR",area,{acao:"editar",nome:"Corrigido"})).status,303);
+    assert.equal((await chamar("ADMINISTRADOR",area,excluir)).status,303);
+    assert.equal((await chamar("ADMINISTRADOR",area,excluir)).status,404);
+  }
+  for (const tabela of ["historico","auditoria_convencional"])
+    assert.equal(sql.prepare("SELECT COUNT(*) AS n FROM "+tabela).get().n,2);
+  sql.close();
 });
