@@ -196,7 +196,20 @@ export function lerCookie(
   return null;
 }
 
-export async function obterUsuarioLogado(
+const sessoesPorRequisicao = new WeakMap();
+
+export async function obterUsuarioLogado(request, env) {
+  if (request.method !== "GET") return consultarUsuarioLogado(request, env);
+  let consulta = sessoesPorRequisicao.get(request);
+  if (!consulta) {
+    consulta = consultarUsuarioLogado(request, env);
+    sessoesPorRequisicao.set(request, consulta);
+  }
+  const usuario = await consulta;
+  return usuario ? { ...usuario } : null;
+}
+
+async function consultarUsuarioLogado(
   request,
   env
 ) {

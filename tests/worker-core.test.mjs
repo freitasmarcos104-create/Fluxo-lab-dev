@@ -362,3 +362,21 @@ test('emissão usa identificador por certificado, lote atômico e imagem restrit
   assert.match(codigo, /SELECT \* FROM universidade_certificados_v321 WHERE id=\? AND usuario_id=\?/);
   assert.match(codigo, /imagemCertificadoUniversidade\(c\), \{headers:\{"Content-Type":"image\/svg\+xml/);
 });
+
+import { dataCurtaLaboratorio } from '../worker/core/data-local.js';
+import { obterUsuarioLogado } from '../worker/core/auth.js';
+test('a noite de Minas mantém o dia correto para eventos e prazos civis', () => {
+  assert.equal(dataCurtaLaboratorio('2026-11-19T00:08:00.000Z'), '18/11/2026');
+  assert.equal(dataCurtaLaboratorio('2026-11-19 02:59:59'), '18/11/2026');
+  assert.equal(dataCurtaLaboratorio('2026-11-19T03:00:00Z'), '19/11/2026');
+  assert.equal(dataCurtaLaboratorio('2026-11-19'), '19/11/2026');
+});
+test('consulta a sessão uma vez por navegação e revalida na próxima página', async () => {
+  let consultas = 0;
+  const env = { db: { prepare: () => ({ bind: () => ({ first: async () => ({id: ++consultas}) }) }) } };
+  const request = () => new Request('https://example.com/', {headers:{cookie:'fluxo_session=teste'}});
+  const primeira = request();
+  const usuarios = await Promise.all([obterUsuarioLogado(primeira, env), obterUsuarioLogado(primeira, env)]);
+  assert.deepEqual(usuarios, [{id:1}, {id:1}]);
+  assert.deepEqual(await obterUsuarioLogado(request(), env), {id:2});
+});
