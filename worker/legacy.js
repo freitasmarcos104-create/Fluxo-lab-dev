@@ -1,3 +1,4 @@
+import { gerirTrabalho, atalhosLixeira } from "./modules/gestao-trabalho.js";
 import { trabalhosClinica, podeAcessarClinica } from "./modules/trabalhos-clinica.js";
 import { obterUsuarioLogado } from "./core/auth.js";
 import { dataCurtaLaboratorio as dataCurtaComunicacaoV322 } from "./core/data-local.js";
@@ -6032,6 +6033,7 @@ function layout(conteudo, titulo = "Fluxo Lab", usuario = null) {
 
   <main class="container">
     ${conteudo}
+    ${isAdmin(usuario) ? atalhosLixeira : ""}
   </main>
 
 </div>
@@ -13103,7 +13105,7 @@ Enviar à coordenação
 `;
 }
 function blocoExcluirPaciente(usuario, trabalho) {
-  if (!isCoord(usuario)) {
+  if (!isAdmin(usuario)) {
     return "";
   }
   return `
@@ -13123,7 +13125,7 @@ function blocoExcluirPaciente(usuario, trabalho) {
     color:#b42318;
   "
 >
-Excluir / cancelar paciente
+🗑️ Excluir / cancelar paciente
 </summary>
 
 <p class="nota">
@@ -15826,7 +15828,7 @@ Restaurar
 </form>
 ` : ""}
 
-${isCoord(usuario) && trabalho.pode_excluir ? `
+${isAdmin(usuario) && trabalho.pode_excluir ? `
 
 <form
   method="POST"
@@ -26029,6 +26031,12 @@ async function rotearV31Base(request, env, url, caminho) {
     }
     return redirect(`/meu-perfil?ok=${encodeURIComponent(valor ? "Avatar atualizado." : "Avatar removido.")}`);
   }
+  const gestaoTrabalho = caminho.match(/^\/gestao-trabalho\/(digital|convencional)\/(\d+)$/);
+  if (gestaoTrabalho) {
+    const usuario = await obterUsuarioLogado(request, env);
+    if (!usuario) return redirect("/");
+    return gerirTrabalho(request, env.db, usuario, gestaoTrabalho[1], Number(gestaoTrabalho[2]), { layout, htmlResponse, escapeHtml, redirect });
+  }
   if (caminho === "/trabalhos-clinica") {
     const usuario = await obterUsuarioLogado(request, env);
     if (!usuario) return redirect("/");
@@ -29148,7 +29156,8 @@ const legacy = {
         if (!usuario) {
           return redirect("/");
         }
-        if (!isCoord(usuario)) {
+        if (request.headers.get("Origin") !== new URL(request.url).origin) return textResponse("Origem inválida.",403);
+        if (!isAdmin(usuario)) {
           return textResponse(
             "Acesso negado.",
             403
@@ -29838,9 +29847,10 @@ const legacy = {
         if (!usuario) {
           return redirect("/");
         }
-        if (!isCoord(usuario)) {
+        if (request.headers.get("Origin") !== new URL(request.url).origin) return textResponse("Origem inválida.",403);
+        if (!isAdmin(usuario)) {
           return textResponse(
-            "Apenas Administrador/Coordenador pode excluir um paciente.",
+            "Apenas Administrador pode excluir um paciente.",
             403
           );
         }
