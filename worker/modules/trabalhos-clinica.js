@@ -1,3 +1,4 @@
+import { ficha, progresso, estilos } from "./clinica-form.js";
 export const tiposClinica = [
   "Prótese total digital de alta qualidade", "Prótese parcial removível (PPR)",
   "Placa de bruxismo", "Coroa", "Ponte", "Faceta", "Onlay", "Inlay", "Prótese fixa"
@@ -22,50 +23,62 @@ export async function trabalhosClinica(request, db, usuario, { layout, htmlRespo
   if (request.method === "POST") {
     if (request.headers.get("Origin") !== url.origin) return erro("Origem inválida.", 403);
     const form = await request.formData();
-    if (form.get("acao") === "status") {
-      const id = Number(form.get("id"));
-      const destino = form.get("concluido");
-      if (!Number.isSafeInteger(id) || id <= 0 || !["0","1"].includes(destino)) return erro("Trabalho inválido.", 400);
-      const resultado = await db.prepare("UPDATE trabalhos_clinica SET concluido=? WHERE usuario_id=? AND id=?")
-        .bind(Number(destino), usuario.id, id).run();
-      if (!resultado.meta.changes) return erro("Trabalho não encontrado.", 404);
-    } else if (form.get("acao") === "criar") {
-      const campo = nome => String(form.get(nome) ?? "").trim();
-      const referencia = campo("referencia"), tipo = campo("tipo"), prazo = campo("prazo");
+    const campo = nome => String(form.get(nome) ?? "").trim();
+    let destino = rota;
+    if (campo("acao") === "paciente") {
+      const nome = campo("nome"), chave = campo("chave");
+      if (!nome || nome.length > 100 || !uuid.test(chave)) return erro("Confira o nome do paciente.", 400);
+      await db.prepare("INSERT INTO clinica_pacientes(usuario_id,nome,chave) VALUES(?,?,?) ON CONFLICT(usuario_id,chave) DO NOTHING")
+        .bind(usuario.id,nome,chave).run();
+      const paciente = await db.prepare("SELECT id FROM clinica_pacientes WHERE usuario_id=? AND chave=?").bind(usuario.id,chave).first();
+      destino = rota + "?paciente=" + paciente.id;
+    } else if (campo("acao") === "etapa") {
+      const id = Number(campo("id")), atual = Number(campo("atual"));
+      if (!Number.isSafeInteger(id) || id < 1 || !/^[0-8]$/.test(campo("atual"))) return erro("Etapa inválida.", 400);
+      const seguinte = atual === 8 ? 7 : atual + 1;
+      const resultado = await db.prepare("UPDATE trabalhos_clinica SET andamento=?, concluido=? WHERE usuario_id=? AND id=? AND andamento=?")
+        .bind(seguinte, Number(seguinte===8), usuario.id, id, atual).run();
+      if (!resultado.meta.changes) return erro("O caso está indisponível ou a etapa já foi atualizada. Volte à Clínica para conferir.", 409);
+    } else if (campo("acao") === "criar") {
+      const paciente = Number(campo("paciente")), tipo = campo("tipo"), prazo = campo("prazo");
+      const dentes = new Set(form.getAll("fdi"));
+      const arcadas = form.getAll("arcada");
+      if ([...dentes].some(d => !/^[1-4][1-8]$/.test(d)) || arcadas.some(a => !["superior","inferior"].includes(a)))
+        return erro("Seleção FDI inválida.", 400);
+      for (const arcada of arcadas) {
+        for (const q of arcada === "superior" ? [1,2] : [3,4]) {
+          for (let i=1; i<=8; i++) dentes.add(String(q*10+i));
+        }
+      }
+      if (!dentes.size) return erro("Selecione ao menos um dente ou uma arcada.", 400);
       const observacoes = campo("observacoes"), chave = campo("chave");
-      if (!referencia || referencia.length > 100 || !tiposClinica.includes(tipo) || observacoes.length > 1000 || !uuid.test(chave))
-        return erro("Confira a referência, o tipo e as observações do trabalho.", 400);
+      if (!Number.isSafeInteger(paciente) || paciente < 1 || !tiposClinica.includes(tipo) || observacoes.length > 1000 || !uuid.test(chave))
+        return erro("Confira o paciente, o tipo e as observações do trabalho.", 400);
       if (prazo) {
         const data = new Date(prazo + "T00:00:00Z");
         if (!/^\d{4}-\d{2}-\d{2}$/.test(prazo) || !Number.isFinite(data.getTime()) || data.toISOString().slice(0, 10) !== prazo)
           return erro("Prazo inválido.", 400);
       }
-      await db.prepare(`INSERT INTO trabalhos_clinica (usuario_id,chave,referencia,tipo,prazo,observacoes)
-        VALUES (?,?,?,?,?,?) ON CONFLICT(usuario_id,chave) DO NOTHING`)
-        .bind(usuario.id, chave, referencia, tipo, prazo || null, observacoes).run();
+      const registro = await db.prepare("SELECT nome FROM clinica_pacientes WHERE id=? AND usuario_id=?").bind(paciente,usuario.id).first();
+      if (!registro) return erro("Paciente não encontrado.",404);
+      await db.prepare(`INSERT INTO trabalhos_clinica (usuario_id,chave,referencia,tipo,prazo,observacoes,paciente_id,dentes)
+        VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(usuario_id,chave) DO NOTHING`)
+        .bind(usuario.id, chave, registro.nome, tipo, prazo || null, observacoes, paciente, [...dentes].sort().join(", ")).run();
     } else return erro("Ação inválida.", 400);
-    return new Response(null, {status:303, headers:{Location:rota, "Cache-Control":"private, no-store"}});
+    return new Response(null, {status:303, headers:{Location:destino, "Cache-Control":"private, no-store"}});
   }
   if (request.method !== "GET") return erro("Método inválido.", 405);
   const antes = Number(url.searchParams.get("antes")) || Number.MAX_SAFE_INTEGER;
   if (!Number.isSafeInteger(antes) || antes < 1) return erro("Página inválida.", 400);
-  const {results} = await db.prepare("SELECT id,referencia,tipo,prazo,observacoes,concluido FROM trabalhos_clinica WHERE usuario_id=? AND id<? ORDER BY id DESC LIMIT 21")
+  const {results} = await db.prepare("SELECT id,referencia,tipo,prazo,observacoes,dentes,andamento,paciente_id FROM trabalhos_clinica WHERE usuario_id=? AND id<? ORDER BY id DESC LIMIT 21")
     .bind(usuario.id, antes).all();
+  const pacientes = await db.prepare("SELECT id,nome FROM clinica_pacientes WHERE usuario_id=? ORDER BY nome COLLATE NOCASE,id").bind(usuario.id).all();
   const itens = results.slice(0,20).map(item => `<article class="card"><h3>${escapeHtml(item.referencia)}</h3>
-    <p>${escapeHtml(item.tipo)} · <strong>${item.concluido ? "Concluído" : "Em andamento"}</strong></p>
+    <p>${escapeHtml(item.tipo)}</p><p>${item.paciente_id ? "Paciente #" + item.paciente_id : "Referência anterior"} · FDI: ${escapeHtml(item.dentes || "sem registro")}</p>
     ${item.prazo ? `<p>Prazo de entrega: ${escapeHtml(item.prazo.split("-").reverse().join("/"))}</p>` : ""}
     ${item.observacoes ? `<p style="white-space:pre-wrap;overflow-wrap:anywhere">${escapeHtml(item.observacoes)}</p>` : ""}
-    <form action="${rota}" method="post"><input type="hidden" name="acao" value="status">
-    <input type="hidden" name="id" value="${item.id}"><input type="hidden" name="concluido" value="${item.concluido ? 0 : 1}">
-    <button type="submit">${item.concluido ? "Reabrir trabalho" : "Marcar como concluído"}</button></form></article>`).join("");
-  return pagina(`<section class="card"><h1>Trabalhos da Clínica</h1><p>Só você vê estes casos. Eles ficam fora das metas e da fila do laboratório.</p>
-    <details><summary>Novo trabalho</summary><form method="post" action="${rota}">
-    <input type="hidden" name="acao" value="criar"><input type="hidden" name="chave" value="${crypto.randomUUID()}">
-    <label>Referência do caso<input name="referencia" maxlength="100" required></label>
-    <label>Tipo de trabalho<select name="tipo" required><option value="">Selecione</option>${tiposClinica.map(t => `<option>${t}</option>`).join("")}</select></label>
-    <label>Prazo de entrega (opcional)<input type="date" name="prazo"></label>
-    <label>Observações (opcional)<textarea name="observacoes" maxlength="1000"></textarea></label>
-    <button type="submit">Salvar trabalho</button></form></details></section>
+    ${progresso(item)}</article>`).join("");
+  return pagina(`${estilos}${ficha(pacientes.results,Number(url.searchParams.get("paciente")),tiposClinica,escapeHtml)}
     <h2>Meus trabalhos</h2>${itens || "<p>Nenhum trabalho nesta lista.</p>"}
     ${results.length > 20 ? `<a href="${rota}?antes=${results[19].id}">Trabalhos anteriores</a>` : ""}
     ${url.searchParams.has("antes") ? `<a href="${rota}">Voltar aos mais recentes</a>` : ""}`);
