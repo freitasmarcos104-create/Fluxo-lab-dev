@@ -352,3 +352,13 @@ test("injeta cache novo no service worker sem alterar outros scripts", async () 
   assert.equal(await response.text(), "const FLUXO_CACHE='fluxo-lab-v5.14.0';");
 });
 
+
+test('emissão usa identificador por certificado, lote atômico e imagem restrita ao titular', async () => {
+  const codigo = await readFile(new URL('../worker/legacy.js', import.meta.url), 'utf8');
+  const emissao = codigo.slice(codigo.indexOf('async function universidadeEmitirSeElegivel'), codigo.indexOf('async function rotaUniversidade'));
+  assert.match(emissao, /const codigo = "FLU-" \+ crypto\.randomUUID\(\)/);
+  assert.match(emissao, /env\.db\.batch\(/);
+  assert.match(emissao, /ON CONFLICT\(matricula_id\) DO NOTHING/);
+  assert.match(codigo, /SELECT \* FROM universidade_certificados_v321 WHERE id=\? AND usuario_id=\?/);
+  assert.match(codigo, /imagemCertificadoUniversidade\(c\), \{headers:\{"Content-Type":"image\/svg\+xml/);
+});
