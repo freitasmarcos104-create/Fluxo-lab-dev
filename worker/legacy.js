@@ -20133,7 +20133,8 @@ function montarEditorNotaV590(conteudoHtml, identificador) {
         <button type="button" class="nota-format-v590" data-note-color-v590="red" title="Marca-texto vermelho" aria-label="Marca-texto vermelho"><span class="nota-swatch-v590 vermelho"></span></button>
         <button type="button" class="nota-format-v590" data-note-color-v590="green" title="Marca-texto verde" aria-label="Marca-texto verde"><span class="nota-swatch-v590 verde"></span></button>
         <button type="button" class="nota-format-v590" data-note-color-v590="blue" title="Marca-texto azul" aria-label="Marca-texto azul"><span class="nota-swatch-v590 azul"></span></button>
-        <span class="nota-toolbar-ajuda-v590">Selecione uma palavra ou trecho antes de aplicar</span>
+        <button type="button" class="nota-format-v590" data-note-action-v590="sem-cor" title="Remover marca-texto da seleção">Sem cor</button>
+        <span class="nota-toolbar-ajuda-v590">Selecione um trecho. Clique novamente em B ou na mesma cor para retirar.</span>
       </div>
       <div class="nota-editor-v590" contenteditable="true" role="textbox" aria-multiline="true" data-note-content-v590 data-placeholder="Escreva aqui...">${conteudoHtml || ""}</div>
       <input type="hidden" name="conteudo" data-note-value-v590>
@@ -20268,18 +20269,82 @@ function paginaMinhasNotasV310(usuario, notas, mensagem = "", tipo = "sucesso") 
               status.textContent="Selecione uma palavra ou trecho primeiro.";
               return;
             }
-            var tag=botao.dataset.noteActionV590==="bold"?"strong":"mark";
-            var elemento=document.createElement(tag);
-            if(tag==="mark") elemento.setAttribute("data-cor",botao.dataset.noteColorV590||"yellow");
-            var fragmento=faixa.extractContents();
-            elemento.appendChild(fragmento);
-            faixa.insertNode(elemento);
-            var selecao=window.getSelection();
-            var novaFaixa=document.createRange();
-            novaFaixa.selectNodeContents(elemento);
-            if(selecao){selecao.removeAllRanges();selecao.addRange(novaFaixa);}
-            ultimaFaixa=novaFaixa.cloneRange();
+            // Offsets de texto sobrevivem à remoção das camadas de formatação antigas.
+            const prefixo = faixa.cloneRange();
+            prefixo.selectNodeContents(editor);
+            prefixo.setEnd(faixa.startContainer, faixa.startOffset);
+            const inicio = prefixo.toString().length;
+            const fim = inicio + faixa.toString().length;
+            if (inicio === fim) return;
+            const negrito = botao.dataset.noteActionV590 === "bold";
+            const cor = botao.dataset.noteColorV590 || "";
+            const trechos = [];
+            let posicao = 0;
+            const arvore = document.createTreeWalker(editor, NodeFilter.SHOW_TEXT);
+            while (arvore.nextNode()) {
+              const no = arvore.currentNode;
+              const proximo = posicao + no.length;
+              if (posicao < fim && proximo > inicio && no.length) {
+                trechos.push({bold:!!no.parentElement.closest("strong,b"),cor:no.parentElement.closest("mark")?.dataset.cor || ""});
+              }
+              posicao = proximo;
+            }
+            const retirar = trechos.every(t => negrito ? t.bold : t.cor === cor);
+            const novaFaixa = document.createRange();
+            let primeiro = null, ultimo = null;
+            posicao = 0;
+            function copiar(origem, destino, bold, destaque) {
+              for (const no of origem.childNodes) {
+                if (no.nodeType === Node.TEXT_NODE) {
+                  const de = posicao;
+                  posicao += no.length;
+                  const cortes = [0, inicio-de, fim-de, no.length].filter(i => i>=0 && i<=no.length).sort((a,b)=>a-b);
+                  for (let i=1;i<cortes.length;i++) {
+                    const a = cortes[i-1], b = cortes[i];
+                    if (a===b) continue;
+                    const selecionado = de+a>=inicio && de+b<=fim;
+                    const usarBold = selecionado && negrito ? !retirar : bold;
+                    const usarCor = selecionado && !negrito ? (retirar ? "" : cor) : destaque;
+                    let pai = destino;
+                    if (usarCor) {
+                      let marca = pai.lastChild;
+                      if (marca?.nodeName!=="MARK" || marca.dataset.cor!==usarCor) {
+                        marca = document.createElement("mark");
+                        marca.dataset.cor = usarCor;
+                        pai.append(marca);
+                      }
+                      pai = marca;
+                    }
+                    if (usarBold) {
+                      if (pai.lastChild?.nodeName!=="STRONG") pai.append(document.createElement("strong"));
+                      pai = pai.lastChild;
+                    }
+                    const texto = document.createTextNode(no.data.slice(a,b));
+                    pai.append(texto);
+                    if (selecionado) { primeiro ||= texto; ultimo = texto; }
+                  }
+                } else if (no.nodeType === Node.ELEMENT_NODE) {
+                  if (no.matches("b,strong")) copiar(no,destino,true,destaque);
+                  else if (no.matches("mark")) copiar(no,destino,bold,no.dataset.cor || "yellow");
+                  else {
+                    const copia = no.cloneNode(false);
+                    destino.append(copia);
+                    copiar(no,copia,bold,destaque);
+                  }
+                }
+              }
+            }
+            const fragmento = document.createDocumentFragment();
+            copiar(editor,fragmento,false,"");
+            if (!primeiro) return;
+            editor.replaceChildren(fragmento);
+            novaFaixa.setStart(primeiro,0);
+            novaFaixa.setEnd(ultimo,ultimo.length);
             editor.focus();
+            const selecao = window.getSelection();
+            selecao.removeAllRanges();
+            selecao.addRange(novaFaixa);
+            ultimaFaixa = novaFaixa.cloneRange();
             atualizar();
           });
           form.addEventListener("submit",function(event){
