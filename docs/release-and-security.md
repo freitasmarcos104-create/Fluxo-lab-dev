@@ -11,9 +11,10 @@
 
 1. Alterações do Worker ficam em worker/.
 2. Pull Requests executam validação de sintaxe, configuração Cloudflare e testes.
-3. O merge aprovado em main aciona Cloudflare Workers Builds.
-4. Workers Builds executa npm run check e npm run deploy na pasta worker/.
-5. O comando npm run deploy chama cf deploy --mode production.
+3. O merge aprovado em main aciona o workflow deploy-production de .github/workflows/ci.yml, depois da conclusão bem-sucedida dos testes.
+4. O job instala as ferramentas em worker/ e executa npm run deploy com Cloudflare CLI cf.
+5. O único segredo de publicação é CLOUDFLARE_API_TOKEN; CLOUDFLARE_ACCOUNT_ID identifica a conta de destino.
+6. A conta Cloudflare foi verificada em 16/11/2026 e não apresenta configuração nem gatilhos de Cloudflare Workers Builds para fluxo-lab. Não criar um segundo caminho de publicação em paralelo.
 
 Não publique pelo editor rápido da Cloudflare, não envie outra cópia de legacy.js e não atualize o Worker por caminhos paralelos.
 

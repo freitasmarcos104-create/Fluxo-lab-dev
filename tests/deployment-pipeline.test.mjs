@@ -27,3 +27,15 @@ test('pull requests validam, mas não publicam em produção', () => {
   assert.match(workflow, /pull_request:/);
   assert.match(workflow, /github\.event_name != 'pull_request'/);
 });
+
+const installers = await readFile(
+  new URL('../.github/workflows/build-installers.yml', import.meta.url),
+  'utf8'
+);
+
+test('assinatura PKCS12 usa a senha do keystore e exige apenas três segredos', () => {
+  assert.ok(installers.includes('ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}'));
+  assert.ok(!installers.includes('KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}'));
+  assert.ok(installers.includes('if [[ -n "$KEYSTORE_BASE64" && -n "$KEYSTORE_PASSWORD" && -n "$KEY_ALIAS" ]]; then'));
+  assert.ok(installers.includes('Configure os três segredos do Android'));
+});

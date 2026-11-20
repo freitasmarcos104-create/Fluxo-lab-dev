@@ -15,11 +15,12 @@ Evoluir o Fluxo Lab oficial com uma única fonte de código e um único caminho 
 ## Publicação
 
 1. Faça alterações em branch própria e abra Pull Request para main.
-2. O CI valida worker/ e os testes da raiz.
-3. Cloudflare Workers Builds é o único publicador do Worker. Seu root directory é /worker; build command: npm run check; deploy command: npm run deploy.
-4. A configuração do Worker usa Cloudflare CLI (cf) e worker/cloudflare.config.ts. Não criar wrangler.toml, wrangler.json ou wrangler.jsonc e não usar upload manual pelo painel.
-5. Não execute deploy manualmente. O deploy ocorre somente pelo fluxo controlado de merge em main.
-6. Mudanças em desktop/ ou android/ só exigem novos instaladores quando alterarem código nativo.
+2. O GitHub Actions em .github/workflows/ci.yml é o único publicador do Worker oficial. Ele valida sintaxe, configuração Cloudflare e testes nos Pull Requests e na branch main.
+3. Depois do merge aprovado em main e da conclusão bem-sucedida de worker-tests, o job deploy-production executa npm run deploy na pasta worker/.
+4. O deploy usa o Cloudflare CLI cf e worker/cloudflare.config.ts, com CLOUDFLARE_API_TOKEN e CLOUDFLARE_ACCOUNT_ID.
+5. A conta Cloudflare foi verificada em 16/11/2026: não há configuração nem gatilhos de Cloudflare Workers Builds associados ao Worker fluxo-lab. Não configurar um segundo publicador em paralelo.
+6. Não execute deploy manualmente. A publicação deve ocorrer somente pelo fluxo controlado de merge em main.
+7. Mudanças em desktop/ ou android/ só exigem novos instaladores quando alterarem código nativo.
 
 ## Regras obrigatórias
 
