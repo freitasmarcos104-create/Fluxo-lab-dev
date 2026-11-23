@@ -40,6 +40,8 @@ jobs:
         run: node --test tests/achievements.test.mjs
       - name: Run rich notes tests
         run: node --test tests/rich-notes.test.mjs
+      - name: Validate prosthesis selection views
+        run: node --test tests/remessas-proteses.test.mjs
       - name: Validate deployment safety contract
         run: node --test tests/deployment-pipeline.test.mjs
 

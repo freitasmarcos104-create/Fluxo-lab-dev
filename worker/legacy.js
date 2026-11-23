@@ -5,6 +5,7 @@ import { dataCurtaLaboratorio as dataCurtaComunicacaoV322 } from "./core/data-lo
 import { cadastrarCursoAnatomia, renderCheckpointAnatomia, TITULO_CURSO_ANATOMIA } from "./modules/curso-anatomia.js";
 // FLUXO LAB V5.9.0 — EDITOR DE ANOTAÇÕES FORMATADAS
 import { renderRichNoteValue, countRichNoteCharacters, serializeRichNoteValue } from "./modules/rich-notes.js";
+import { renderPainelProtesesRemessaV515, renderBadgesProtesesRemessaV515 } from "./modules/remessas-proteses.js";
 async function listarChatServiceV54(env, trabalhoId) {
   const resultado = await env.db.prepare(`
 
@@ -11538,7 +11539,20 @@ function indicadorProgressoSetorV3411(status, setor) {
   }
   return `<span title="${escapeHtml(tituloSetor)} aguardando" aria-label="${escapeHtml(tituloSetor)} aguardando" style="display:inline-flex;width:24px;height:24px;border-radius:999px;align-items:center;justify-content:center;border:1px solid var(--borda);color:var(--texto-suave);font-weight:900;font-size:13px">○</span>`;
 }
-function paginaTrabalhos(usuario, dados, busca, filtro, remessasMes, remessasSelecao, mesRemessas, remessaFiltro = 0, pacientesSemRemessa = [], designacoesRemessaFiltro = [], resumoProgressoRemessa = null, ordem = "padrao", mensagem = "", tipo = "sucesso") {
+// Visualizacao somente leitura: a consulta respeita a visibilidade do usuario.
+async function listarProtesesRemessaV515(env, remessaId, usuario) {
+  const id = Number(remessaId);
+  if (!Number.isSafeInteger(id) || id <= 0) return [];
+  const acesso = clausulaVisibilidadeTrabalhoDigitalV345(usuario, "t");
+  const resultado = await env.db.prepare(`
+    SELECT t.id, t.codigo, t.paciente, t.superior_tipo, t.inferior_tipo
+    FROM trabalhos t
+    WHERE t.remessa_id = ? AND t.excluido = 0 ${acesso.sql}
+    ORDER BY t.paciente COLLATE NOCASE, t.id
+  `).bind(id, ...acesso.args).all();
+  return resultado.results || [];
+}
+function paginaTrabalhos(usuario, dados, busca, filtro, remessasMes, remessasSelecao, mesRemessas, remessaFiltro = 0, pacientesSemRemessa = [], designacoesRemessaFiltro = [], resumoProgressoRemessa = null, ordem = "padrao", mensagem = "", tipo = "sucesso", pacientesProtesesRemessa = []) {
   const remessaSelecionada = remessasSelecao.find(
     (item) => Number(item.id) === Number(remessaFiltro)
   );
@@ -11575,6 +11589,7 @@ ${escapeHtml(
 ${escapeHtml(
       trabalho.paciente
     )}
+<div>${renderBadgesProtesesRemessaV515(trabalho)}</div>
 </td>
 
 <td>
@@ -11992,6 +12007,7 @@ ${remessaSelecionada ? `
     </div>
     ${podeGerenciarAreaV31(usuario, "DIGITAL") ? painelProgressoRemessaV362(resumoProgressoRemessa) : ""}
     ${painelEquipeRemessaFiltro}
+    ${renderPainelProtesesRemessaV515(pacientesProtesesRemessa, remessaSelecionada.id, { permitirLinks: true })}
     ` : ""}
 
 <div class="filtros">
@@ -19199,7 +19215,8 @@ function paginaCadastroV3418(usuario, dados, mensagem = "", tipo = "sucesso") {
     const elegiveis = (dados.semRemessa || []).filter((p) => String(p.municipio || "").trim().toLowerCase() === municipioChave);
     const status = r.data_entrega_real ? "Entregue" : r.data_finalizacao ? "Finalizada" : "Aberta para cadastro";
     const classe = r.data_entrega_real ? "ok" : r.data_finalizacao ? "andamento" : "neutro";
-    const linhas = pacientes.map((p) => `<tr><td><strong>${escapeHtml(p.paciente)}</strong><div class="mini">${escapeHtml(p.codigo)}</div></td><td>${escapeHtml(nomeTipo(p.superior_tipo))}</td><td>${escapeHtml(nomeTipo(p.inferior_tipo))}</td></tr>`).join("");
+    // A visualizacao le as arcadas persistidas no trabalho, sem gravar dados.
+
     const opcoesAntigos = elegiveis.map((p) => `<option value="${Number(p.id)}">${escapeHtml(p.paciente)} · ${escapeHtml(p.codigo)}</option>`).join("");
     return `<section class="card" id="cadastro-remessa-${Number(r.id)}">
       <div style="display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap">
@@ -19242,7 +19259,7 @@ function paginaCadastroV3418(usuario, dados, mensagem = "", tipo = "sucesso") {
       ` : `<div class="info" style="margin-top:14px"><strong>🔒 Remessa encerrada.</strong> O perfil Cadastro pode consultar os pacientes, mas não inserir ou alterar esta remessa.</div>`}
 
       <details style="margin-top:14px" ${pacientes.length <= 12 ? "open" : ""}><summary style="cursor:pointer;font-weight:900">Pacientes desta remessa (${pacientes.length})</summary>
-        <div class="tabela-wrap" style="margin-top:10px"><table><thead><tr><th>Paciente</th><th>Superior</th><th>Inferior</th></tr></thead><tbody>${linhas || `<tr><td colspan="3">Nenhum paciente cadastrado nesta remessa.</td></tr>`}</tbody></table></div>
+        ${renderPainelProtesesRemessaV515(pacientes, r.id, { permitirLinks: false })}
       </details>
     </section>`;
   }).join("");
@@ -29516,7 +29533,8 @@ const legacy = {
           remessasMes,
           remessasSelecao,
           pacientesSemRemessa,
-          resumoProgressoRemessa
+          resumoProgressoRemessa,
+          pacientesProtesesRemessa
         ] = await Promise.all([
           listarTrabalhos(
             env,
@@ -29536,7 +29554,8 @@ const legacy = {
             env
           ),
           podeGerenciarAreaV31(usuario, "DIGITAL") ? listarPacientesDigitaisSemRemessa(env) : Promise.resolve([]),
-          remessaFiltro && podeGerenciarAreaV31(usuario, "DIGITAL") ? resumoProgressoRemessaV362(env, remessaFiltro) : Promise.resolve(null)
+          remessaFiltro && podeGerenciarAreaV31(usuario, "DIGITAL") ? resumoProgressoRemessaV362(env, remessaFiltro) : Promise.resolve(null),
+          remessaFiltro ? listarProtesesRemessaV515(env, remessaFiltro, usuario) : Promise.resolve([])
         ]);
         let designacoesRemessaFiltro = [];
         if (remessaFiltro && podeGerenciarAreaV31(usuario, "DIGITAL")) {
@@ -29573,7 +29592,8 @@ const legacy = {
             ) || "",
             url.searchParams.get(
               "erro"
-            ) ? "erro" : "sucesso"
+            ) ? "erro" : "sucesso",
+            pacientesProtesesRemessa
           )
         );
       }
