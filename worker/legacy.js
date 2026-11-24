@@ -6,6 +6,7 @@ import { cadastrarCursoAnatomia, renderCheckpointAnatomia, TITULO_CURSO_ANATOMIA
 // FLUXO LAB V5.9.0 — EDITOR DE ANOTAÇÕES FORMATADAS
 import { renderRichNoteValue, countRichNoteCharacters, serializeRichNoteValue } from "./modules/rich-notes.js";
 import { renderPainelProtesesRemessaV515, renderBadgesProtesesRemessaV515 } from "./modules/remessas-proteses.js";
+import { construirMensagemImpedimentoV516, lerImpedimentoV516, renderAvisoRemessaV516, renderFormImpedimentoRemessaV516, sqlAvisoRemessaV516 } from "./modules/impedimentos-remessa.js";
 async function listarChatServiceV54(env, trabalhoId) {
   const resultado = await env.db.prepare(`
 
@@ -11251,6 +11252,9 @@ async function listarTrabalhos(env, busca = "", pagina = 1, filtro = "ativos", r
         t.paciente,
         t.superior_tipo,
         t.inferior_tipo,
+        ${sqlAvisoRemessaV516("t")} AS aviso_remessa,
+        r.data_finalizacao AS remessa_finalizada_em,
+        r.data_entrega_real AS remessa_entregue_em,
         t.criado_em,
         t.entregue,
         t.data_entrega,
@@ -11545,7 +11549,8 @@ async function listarProtesesRemessaV515(env, remessaId, usuario) {
   if (!Number.isSafeInteger(id) || id <= 0) return [];
   const acesso = clausulaVisibilidadeTrabalhoDigitalV345(usuario, "t");
   const resultado = await env.db.prepare(`
-    SELECT t.id, t.codigo, t.paciente, t.superior_tipo, t.inferior_tipo
+    SELECT t.id, t.codigo, t.paciente, t.remessa_id, t.superior_tipo, t.inferior_tipo,
+      ${sqlAvisoRemessaV516("t")} AS aviso_remessa
     FROM trabalhos t
     WHERE t.remessa_id = ? AND t.excluido = 0 ${acesso.sql}
     ORDER BY t.paciente COLLATE NOCASE, t.id
@@ -11590,6 +11595,8 @@ ${escapeHtml(
       trabalho.paciente
     )}
 <div>${renderBadgesProtesesRemessaV515(trabalho)}</div>
+${renderAvisoRemessaV516(trabalho.aviso_remessa, trabalho.remessa_id)}
+${trabalho.remessa_id && !trabalho.remessa_finalizada_em && !trabalho.remessa_entregue_em ? renderFormImpedimentoRemessaV516(trabalho.id, trabalho.remessa_id, trabalho.aviso_remessa, podeCadastrarDigitalV3418(usuario)) : ""}
 </td>
 
 <td>
@@ -12007,7 +12014,7 @@ ${remessaSelecionada ? `
     </div>
     ${podeGerenciarAreaV31(usuario, "DIGITAL") ? painelProgressoRemessaV362(resumoProgressoRemessa) : ""}
     ${painelEquipeRemessaFiltro}
-    ${renderPainelProtesesRemessaV515(pacientesProtesesRemessa, remessaSelecionada.id, { permitirLinks: true })}
+    ${renderPainelProtesesRemessaV515(pacientesProtesesRemessa, remessaSelecionada.id, { permitirLinks: true, permitirEdicao: podeCadastrarDigitalV3418(usuario) && !remessaSelecionada.data_finalizacao && !remessaSelecionada.data_entrega_real })}
     ` : ""}
 
 <div class="filtros">
@@ -12239,7 +12246,7 @@ ${mensagem.resolvido ? "✓ Pendência resolvida" : "⚠ Pendência"}
 <div class="msg-texto">
 
 ${escapeHtml(
-      mensagem.mensagem
+      lerImpedimentoV516(mensagem.mensagem) ? `${lerImpedimentoV516(mensagem.mensagem).situacao} · ${lerImpedimentoV516(mensagem.mensagem).motivo}: ${lerImpedimentoV516(mensagem.mensagem).observacao}` : mensagem.mensagem
     )}
 
 </div>
@@ -19181,7 +19188,8 @@ async function dadosCadastroV3418(env, cicloId = 0) {
                date(r.data_prevista_entrega), r.municipio COLLATE NOCASE, r.id DESC
     `).bind(ciclo.id).all(),
     env.db.prepare(`
-      SELECT t.id,t.codigo,t.paciente,t.municipio,t.superior_tipo,t.inferior_tipo,t.remessa_id,t.criado_em
+      SELECT t.id,t.codigo,t.paciente,t.municipio,t.superior_tipo,t.inferior_tipo,t.remessa_id,t.criado_em,
+        ${sqlAvisoRemessaV516("t")} AS aviso_remessa
       FROM trabalhos t
       INNER JOIN remessas r ON r.id=t.remessa_id
       WHERE r.ciclo_digital_id=? AND t.excluido=0
@@ -19259,7 +19267,7 @@ function paginaCadastroV3418(usuario, dados, mensagem = "", tipo = "sucesso") {
       ` : `<div class="info" style="margin-top:14px"><strong>🔒 Remessa encerrada.</strong> O perfil Cadastro pode consultar os pacientes, mas não inserir ou alterar esta remessa.</div>`}
 
       <details style="margin-top:14px" ${pacientes.length <= 12 ? "open" : ""}><summary style="cursor:pointer;font-weight:900">Pacientes desta remessa (${pacientes.length})</summary>
-        ${renderPainelProtesesRemessaV515(pacientes, r.id, { permitirLinks: false })}
+        ${renderPainelProtesesRemessaV515(pacientes, r.id, { permitirLinks: false, permitirEdicao: podeCadastrarDigitalV3418(usuario) && !fechada })}
       </details>
     </section>`;
   }).join("");
@@ -30098,6 +30106,53 @@ const legacy = {
             ) ? "erro" : "sucesso"
           )
         );
+      }
+      // Reutiliza chat_trabalho (PENDENCIA) com marcador de remessa, sem migracao D1.
+      const rotaAvisoRemessaV516 = caminho.match(new RegExp("^/trabalhos/([0-9]+)/impedimento-remessa$"));
+      if (rotaAvisoRemessaV516 && request.method === "POST") {
+        const usuario = await obterUsuarioLogado(request, env);
+        if (!usuario) return redirect("/");
+        if (!podeCadastrarDigitalV3418(usuario)) return textResponse("Acesso negado ao registro de impedimentos.", 403);
+        const trabalhoId = Number(rotaAvisoRemessaV516[1]);
+        const trabalho = await env.db.prepare(`
+          SELECT t.id, t.remessa_id, r.ciclo_digital_id, r.data_finalizacao, r.data_entrega_real
+          FROM trabalhos t INNER JOIN remessas r ON r.id = t.remessa_id
+          WHERE t.id = ? AND t.excluido = 0 LIMIT 1
+        `).bind(trabalhoId).first();
+        if (!trabalho) return textResponse("Paciente não encontrado na remessa.", 404);
+        if (trabalho.data_finalizacao || trabalho.data_entrega_real) return textResponse("Remessa encerrada: avisos somente para remessas abertas.", 409);
+        const body = await request.formData();
+        const acao = String(body.get("acao") || "");
+        const agora = new Date().toISOString();
+        const padrao = `[FLREMESSA:${trabalho.remessa_id}:%`;
+        const atualiza = env.db.prepare(`
+          UPDATE chat_trabalho
+          SET resolvido=1, resolvido_por=?, resolvido_em=?
+          WHERE trabalho_id=? AND tipo='PENDENCIA' AND resolvido=0 AND mensagem LIKE ?
+        `).bind(usuario.id, agora, trabalho.id, padrao);
+        if (acao === "registrar") {
+          let texto;
+          try {
+            texto = construirMensagemImpedimentoV516(trabalho.remessa_id,body.get("situacao"),body.get("motivo"),body.get("observacao"));
+          } catch (e) {
+            return textResponse(e.message || "Aviso inválido.", 400);
+          }
+          await env.db.batch([
+            atualiza,
+            env.db.prepare(`
+              INSERT INTO chat_trabalho (trabalho_id,usuario_id,mensagem,tipo,resolvido,criado_em)
+              VALUES (?,?,?,'PENDENCIA',0,?)
+            `).bind(trabalho.id,usuario.id,texto,agora)
+          ]);
+        } else if (acao === "resolver") {
+          await atualiza.run();
+        } else {
+          return textResponse("Operação inválida.", 400);
+        }
+        const base = isCadastro(usuario)
+          ? `/cadastro?ciclo=${Number(trabalho.ciclo_digital_id || 0)}&ok=${encodeURIComponent(acao === "resolver" ? "Aviso resolvido." : "Aviso laranja registrado.")}#cadastro-remessa-${trabalho.remessa_id}`
+          : `/trabalhos?remessa=${trabalho.remessa_id}&ok=${encodeURIComponent(acao === "resolver" ? "Aviso resolvido." : "Aviso laranja registrado.")}#lista-pacientes-digitais`;
+        return redirect(base);
       }
       match = caminho.match(
         /^\/trabalhos\/(\d+)\/chat$/

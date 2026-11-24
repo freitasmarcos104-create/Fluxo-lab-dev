@@ -1,3 +1,5 @@
+import { lerImpedimentoV516, renderAvisoRemessaV516, renderFormImpedimentoRemessaV516 } from "./impedimentos-remessa.js";
+
 export function selecaoProtesesRemessaV515(paciente) {
   const origem=[paciente?.superior_tipo,paciente?.inferior_tipo];
   const encontrados=new Set();
@@ -75,13 +77,15 @@ export function renderPainelProtesesRemessaV515(pacientes, remessaId, opcoes={})
   const lista=Array.isArray(pacientes)?pacientes:[];
   const id="proteses-remessa-v515-"+Number(remessaId);
   const grupos=new Map();
-  const contadores={todos:lista.length,pt:0,ppr:0,combinado:0};
+  const contadores={todos:lista.length,pt:0,ppr:0,combinado:0,impedidos:0,semimpedimento:0};
   const flag=(p)=>{
     const c=classificacaoProtesesRemessaV515(p);
     if(c.pt)contadores.pt++;
     if(c.ppr)contadores.ppr++;
     if(c.combinado)contadores.combinado++;
-    const dados=`data-paciente-v515 data-pt-v515="${c.pt?1:0}" data-ppr-v515="${c.ppr?1:0}" data-combinado-v515="${c.combinado?1:0}"`;
+    const impedido=Boolean(lerImpedimentoV516(p.aviso_remessa,remessaId));
+    if(impedido)contadores.impedidos++;else contadores.semimpedimento++;
+    const dados=`data-paciente-v515 data-pt-v515="${c.pt?1:0}" data-ppr-v515="${c.ppr?1:0}" data-combinado-v515="${c.combinado?1:0}" data-impedidos-v515="${impedido?1:0}" data-semimpedimento-v515="${impedido?0:1}"`;
     return {c,dados};
   };
   const registros=lista.map(p=>{
@@ -96,15 +100,17 @@ export function renderPainelProtesesRemessaV515(pacientes, remessaId, opcoes={})
     const nomeVisivel=opcoes.permitirLinks?`<a href="${destino}">${nome}</a>`:nome;
     const nomeCompleto=`<strong>${nomeVisivel}</strong><div class="mini">${codigo}</div>`;
     const badge=renderBadgesProtesesRemessaV515(p);
-    grupos.get(selecao).push(`<div class="fl-prot-paciente-v515" ${dados}><div>${nomeCompleto}</div><div>${badge}</div><div class="mini">Superior: ${superior} · Inferior: ${inferior}</div></div>`);
-    return `<tr ${dados}><td>${nomeCompleto}</td><td>${badge}</td><td>${superior}</td><td>${inferior}</td></tr>`;
+    const aviso=renderAvisoRemessaV516(p.aviso_remessa,remessaId);
+    const formulario=renderFormImpedimentoRemessaV516(p.id,remessaId,p.aviso_remessa,Boolean(opcoes.permitirEdicao));
+    grupos.get(selecao).push(`<div class="fl-prot-paciente-v515" ${dados}><div>${nomeCompleto}</div><div>${badge}</div><div class="mini">Superior: ${superior} · Inferior: ${inferior}</div>${aviso}${formulario}</div>`);
+    return `<tr ${dados}><td>${nomeCompleto}${aviso}${formulario}</td><td>${badge}</td><td>${superior}</td><td>${inferior}</td></tr>`;
   });
   const ordenados=[...grupos.entries()].sort(([a],[b])=>{
     const ordem={PT:0,PPR:1,"PPR + PT":2};
     return (ordem[a]??3)-(ordem[b]??3)||a.localeCompare(b,"pt-BR");
   });
   const partesGrupo=ordenados.map(([nome,grupo])=>`<section class="card fl-prot-grupo-v515" data-grupo-v515><h4 style="margin:0 0 9px">${escaparHtmlProtesesV515(nome)} <span class="badge neutro">${grupo.length}</span></h4><div class="fl-prot-grupo-itens-v515">${grupo.join("")}</div></section>`).join("");
-  const botoes=[["todos","Todos",contadores.todos],["pt","PT",contadores.pt],["ppr","PPR",contadores.ppr],["combinado","PPR + PT",contadores.combinado]].map(([chave,nome,valor])=>`<button class="botao ${chave==="todos"?"":"botao-sec"}" type="button" data-filtro-v515="${chave}" aria-pressed="${chave==="todos"}">${nome} <strong>${valor}</strong></button>`).join("");
+  const botoes=[["todos","Todos",contadores.todos],["pt","PT",contadores.pt],["ppr","PPR",contadores.ppr],["combinado","PPR + PT",contadores.combinado],["impedidos","⚠ Com problema",contadores.impedidos],["semimpedimento","Sem aviso",contadores.semimpedimento]].map(([chave,nome,valor])=>`<button class="botao ${chave==="todos"?"":"botao-sec"}" type="button" data-filtro-v515="${chave}" aria-pressed="${chave==="todos"}">${nome} <strong>${valor}</strong></button>`).join("");
   const js=`(${iniciarControlesProtesesRemessaV515.toString()})(${JSON.stringify(id)});`;
   return `<section id="${id}" class="fl-remessa-proteses-v515" aria-label="Próteses selecionadas na remessa">
     <style>
@@ -124,6 +130,7 @@ export function renderPainelProtesesRemessaV515(pacientes, remessaId, opcoes={})
       <label style="margin:0">Modo de visualização<select data-modo-v515 aria-label="Modo de visualização das próteses"><option value="lista">Lista / badges (padrão)</option><option value="agrupado">Agrupado por seleção</option></select></label>
     </div>
     <div class="fl-prot-filtros-v515" role="group" aria-label="Filtros rápidos de próteses">${botoes}</div>
+    <div role="status" style="margin:8px 0 10px;display:flex;gap:12px;flex-wrap:wrap"><strong>${contadores.todos} cadastrados</strong><span style="color:#fbbf24;font-weight:800">⚠ ${contadores.impedidos} com impedimento</span><span class="mini">${contadores.semimpedimento} sem aviso ativo</span></div>
     <p class="mini" data-resultado-v515 aria-live="polite">${lista.length} paciente(s) nesta seleção.</p>
     <div class="tabela-wrap" data-lista-v515><table><thead><tr><th>Paciente</th><th>Prótese(s)</th><th>Superior</th><th>Inferior</th></tr></thead><tbody>${registros.join("")}</tbody></table></div>
     <div class="fl-prot-grupos-v515" data-agrupado-v515 hidden>${partesGrupo}</div>
