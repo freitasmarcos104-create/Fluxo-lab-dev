@@ -25,6 +25,7 @@
     "files": [
       "main.js",
       "preload.js",
+      "glass-neon-buttons.css",
       "config.json",
       "package.json",
       "assets/**/*"
@@ -33,7 +34,12 @@
     "win": {
       "icon": "assets/fluxolab.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
@@ -49,5 +55,7 @@
       "artifactName": "Fluxo-Lab-Portable-${version}.${ext}"
     }
   },
-  "engines": { "node": ">=22 <23" }
+  "engines": {
+    "node": ">=22 <23"
+  }
 }
