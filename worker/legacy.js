@@ -7,6 +7,7 @@ import { cadastrarCursoAnatomia, renderCheckpointAnatomia, TITULO_CURSO_ANATOMIA
 import { renderRichNoteValue, countRichNoteCharacters, serializeRichNoteValue } from "./modules/rich-notes.js";
 import { renderPainelProtesesRemessaV515, renderBadgesProtesesRemessaV515 } from "./modules/remessas-proteses.js";
 import { construirMensagemImpedimentoV516, lerImpedimentoV516, renderAvisoRemessaV516, renderFormImpedimentoRemessaV516, sqlAvisoRemessaV516 } from "./modules/impedimentos-remessa.js";
+import { renderAvisoPacienteFilaV517, renderResumoAvisosFilaV517 } from "./modules/avisos-fila-funcionario.js";
 async function listarChatServiceV54(env, trabalhoId) {
   const resultado = await env.db.prepare(`
 
@@ -30930,6 +30931,7 @@ async function meusDesignadosV338(env, u, pagina = 1, limite = 20, setorFiltro =
     ${partes.join(" UNION ALL ")}
   ), ativos AS (
     SELECT m.*,t.codigo,t.paciente,t.municipio,t.remessa_id,r.numero AS remessa_numero,u.nome AS responsavel,ud.nome AS designador,
+      ${sqlAvisoRemessaV516("t")} AS aviso_remessa,
       CASE
         WHEN m.status='EM_ANDAMENTO' THEN 'ANDAMENTO'
         WHEN m.recebido_em IS NOT NULL AND m.recebido_em!='' THEN 'LIBERADO'
@@ -30953,7 +30955,8 @@ async function meusDesignadosV338(env, u, pagina = 1, limite = 20, setorFiltro =
     COUNT(DISTINCT CASE WHEN grupo='AGUARDANDO' THEN trabalho_id END) AS pacientes_aguardando,
     COUNT(DISTINCT CASE WHEN grupo IN ('LIBERADO','ANDAMENTO') THEN trabalho_id END) AS pacientes_operacionais,
     (SELECT COUNT(*) FROM (SELECT trabalho_id FROM ativos GROUP BY trabalho_id HAVING MAX(CASE WHEN vinculo='MEU' THEN 1 ELSE 0 END)=0)) AS pacientes_livres,
-    (SELECT COUNT(*) FROM (SELECT trabalho_id FROM ativos GROUP BY trabalho_id HAVING MAX(CASE WHEN vinculo='MEU' THEN 1 ELSE 0 END)=1)) AS pacientes_meus
+    (SELECT COUNT(*) FROM (SELECT trabalho_id FROM ativos GROUP BY trabalho_id HAVING MAX(CASE WHEN vinculo='MEU' THEN 1 ELSE 0 END)=1)) AS pacientes_meus,
+    COUNT(DISTINCT CASE WHEN vinculo='MEU' AND aviso_remessa IS NOT NULL THEN trabalho_id END) AS pacientes_meus_impedidos
     FROM ativos`).bind(...bindsBase).first();
   const paginas = Math.max(1, Math.ceil(Number(resumo?.pacientes || 0) / limite));
   pagina = Math.min(pagina, paginas);
@@ -30993,6 +30996,8 @@ function agruparFilaPacientesV347(itens = []) {
         codigo: r.codigo,
         municipio: r.municipio,
         remessa_numero: r.remessa_numero,
+        remessa_id: r.remessa_id,
+        aviso_remessa: r.aviso_remessa,
         itens: []
       };
       mapa.set(chave, p);
@@ -31038,7 +31043,7 @@ function vinculoPacienteFilaV347(p) {
 }
 function resumoMeusV338(d) {
   const r = d.resumo;
-  return `<p><strong>${Number(r.pacientes_operacionais || 0)} paciente(s) com trabalho disponível agora</strong></p><div class="resumo-fila-v338" style="display:flex;gap:16px;flex-wrap:wrap;margin:12px 0"><span>Designados a mim: <b>${Number(r.pacientes_meus || 0)}</b></span><span>Sem designação: <b>${Number(r.pacientes_livres || 0)}</b></span><span>Disponíveis para iniciar: <b>${Number(r.pacientes_liberados || 0)}</b></span><span>Em andamento: <b>${Number(r.pacientes_andamento || 0)}</b></span><span style="opacity:.72">Aguardando setor anterior: <b>${Number(r.pacientes_aguardando || 0)}</b></span></div>`;
+  return `<p><strong>${Number(r.pacientes_operacionais || 0)} paciente(s) com trabalho disponível agora</strong></p><div class="resumo-fila-v338" style="display:flex;gap:16px;flex-wrap:wrap;margin:12px 0"><span>Designados a mim: <b>${Number(r.pacientes_meus || 0)}</b></span><span>Sem designação: <b>${Number(r.pacientes_livres || 0)}</b></span><span>Disponíveis para iniciar: <b>${Number(r.pacientes_liberados || 0)}</b></span><span>Em andamento: <b>${Number(r.pacientes_andamento || 0)}</b></span><span style="opacity:.72">Aguardando setor anterior: <b>${Number(r.pacientes_aguardando || 0)}</b></span>${Number(r.pacientes_meus_impedidos || 0) ? `<span style="color:#fbbf24;font-weight:800">⚠ ${Number(r.pacientes_meus_impedidos)} com aviso nos meus designados</span>` : ""}</div>`;
 }
 function separarFilaDesignacaoV3414(pacientes = []) {
   const designados = [];
@@ -31065,14 +31070,14 @@ function detalhesAguardandoV354(conteudo, quantidade) {
 }
 function tabelaFilaResumoV3414(pacientes, titulo, descricao, prioritaria = false) {
   if (!pacientes.length) return `<section style="margin-top:18px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${escapeHtml(titulo)}</h3><span class="badge neutro">0</span></div><p class="nota" style="margin-top:6px">${escapeHtml(descricao)}</p><div class="card" style="margin-top:10px;padding:14px"><span class="nota">Nenhum paciente nesta lista.</span></div></section>`;
-  return `<section style="margin-top:18px${prioritaria ? ";padding:14px;border:1px solid rgba(40,210,210,.35);border-radius:14px" : ""}"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${escapeHtml(titulo)}</h3><span class="badge">${pacientes.length}</span>${prioritaria ? '<span class="badge" style="background:rgba(20,155,157,.22)">Prioridade</span>' : ""}</div><p class="nota" style="margin-top:6px">${escapeHtml(descricao)}</p><div class="tabela-wrap" style="margin-top:10px"><table><thead><tr><th>Paciente / remessa</th><th>Minha tarefa</th><th>Situação</th><th></th></tr></thead><tbody>${pacientes.map((p) => `<tr><td><strong>${escapeHtml(p.paciente)}</strong><br>${escapeHtml(p.municipio)} · Remessa ${escapeHtml(p.remessa_numero || "—")}</td><td>${resumoTarefasPacienteV347(p)}<small style="display:block;margin-top:4px;opacity:.72">${escapeHtml(vinculoPacienteFilaV347(p))}</small></td><td>${escapeHtml(estadoPacienteFilaV347(p))}</td><td><a href="/trabalhos/${p.trabalho_id}">Abrir trabalho</a></td></tr>`).join("")}</tbody></table></div></section>`;
+  return `<section style="margin-top:18px${prioritaria ? ";padding:14px;border:1px solid rgba(40,210,210,.35);border-radius:14px" : ""}"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><h3 style="margin:0">${escapeHtml(titulo)}</h3><span class="badge">${pacientes.length}</span>${renderResumoAvisosFilaV517(pacientes)}${prioritaria ? '<span class="badge" style="background:rgba(20,155,157,.22)">Prioridade</span>' : ""}</div><p class="nota" style="margin-top:6px">${escapeHtml(descricao)}</p><div class="tabela-wrap" style="margin-top:10px"><table><thead><tr><th>Paciente / remessa</th><th>Minha tarefa</th><th>Situação</th><th></th></tr></thead><tbody>${pacientes.map((p) => `<tr><td><strong>${escapeHtml(p.paciente)}</strong><br>${escapeHtml(p.municipio)} · Remessa ${escapeHtml(p.remessa_numero || "—")}${renderAvisoPacienteFilaV517(p)}</td><td>${resumoTarefasPacienteV347(p)}<small style="display:block;margin-top:4px;opacity:.72">${escapeHtml(vinculoPacienteFilaV347(p))}</small></td><td>${escapeHtml(estadoPacienteFilaV347(p))}</td><td><a href="/trabalhos/${p.trabalho_id}">Abrir trabalho</a></td></tr>`).join("")}</tbody></table></div></section>`;
 }
 function cardPacienteFilaV3414(u, p) {
   const tarefas = p.itens.map((r) => `<div style="margin-top:12px">${cardProducaoV336(u, r, r.tipo)}</div>`).join("");
-  return `<section class="card" style="margin-bottom:16px"><div style="display:flex;gap:14px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap"><div><h3 style="margin-bottom:4px">${escapeHtml(p.paciente)}</h3><p style="margin:0">${escapeHtml(p.codigo)} · ${escapeHtml(p.municipio)} · Remessa ${escapeHtml(p.remessa_numero || "—")}</p></div><div><span class="badge">${p.itens.length} tarefa(s)</span> <a href="/trabalhos/${p.trabalho_id}">Abrir trabalho completo</a></div></div><div style="margin-top:10px">${resumoTarefasPacienteV347(p)}</div>${tarefas}</section>`;
+  return `<section class="card" style="margin-bottom:16px"><div style="display:flex;gap:14px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap"><div><h3 style="margin-bottom:4px">${escapeHtml(p.paciente)}</h3><p style="margin:0">${escapeHtml(p.codigo)} · ${escapeHtml(p.municipio)} · Remessa ${escapeHtml(p.remessa_numero || "—")}</p>${renderAvisoPacienteFilaV517(p)}</div><div><span class="badge">${p.itens.length} tarefa(s)</span> <a href="/trabalhos/${p.trabalho_id}">Abrir trabalho completo</a></div></div><div style="margin-top:10px">${resumoTarefasPacienteV347(p)}</div>${tarefas}</section>`;
 }
 function secaoFilaCompletaV3414(u, pacientes, titulo, descricao, prioritaria = false) {
-  return `<section style="margin:22px 0${prioritaria ? ";padding:16px;border:1px solid rgba(40,210,210,.35);border-radius:14px" : ""}"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><h2 style="margin:0">${escapeHtml(titulo)}</h2><span class="badge">${pacientes.length}</span>${prioritaria ? '<span class="badge" style="background:rgba(20,155,157,.22)">Prioridade</span>' : ""}</div><p class="nota">${escapeHtml(descricao)}</p>${pacientes.length ? pacientes.map((p) => cardPacienteFilaV3414(u, p)).join("") : '<div class="card">Nenhum paciente nesta lista.</div>'}</section>`;
+  return `<section style="margin:22px 0${prioritaria ? ";padding:16px;border:1px solid rgba(40,210,210,.35);border-radius:14px" : ""}"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:6px"><h2 style="margin:0">${escapeHtml(titulo)}</h2><span class="badge">${pacientes.length}</span>${renderResumoAvisosFilaV517(pacientes)}${prioritaria ? '<span class="badge" style="background:rgba(20,155,157,.22)">Prioridade</span>' : ""}</div><p class="nota">${escapeHtml(descricao)}</p>${pacientes.length ? pacientes.map((p) => cardPacienteFilaV3414(u, p)).join("") : '<div class="card">Nenhum paciente nesta lista.</div>'}</section>`;
 }
 function painelMeusV338(d) {
   if (!d) return "";
