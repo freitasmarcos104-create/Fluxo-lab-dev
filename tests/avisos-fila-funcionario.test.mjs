@@ -48,7 +48,7 @@ test("integracao no inicio e na fila completa preserva o mesmo CTE e vinculo",()
   const fim=src.indexOf("function nomeArcadaFilaV347(",idx);
   assert.ok(idx>=0&&fim>idx);
   const sql=src.slice(idx,fim);
-  assert.match(sql,/sqlAvisoRemessaV516\("t"\) AS aviso_remessa/);
+  assert.match(sql,/sqlAvisoRemessaV516\("t"\)\} AS aviso_remessa/);
   assert.match(sql,/COUNT\(DISTINCT CASE WHEN vinculo='MEU' AND aviso_remessa IS NOT NULL THEN trabalho_id END\) AS pacientes_meus_impedidos/);
   assert.match(sql,/e\.responsavel_id IS NULL OR e\.responsavel_id=\?/);
   assert.match(sql,/c\.responsavel_id IS NULL OR c\.responsavel_id=\?/);
