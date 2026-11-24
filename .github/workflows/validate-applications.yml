@@ -29,6 +29,9 @@ jobs:
       - name: Check Electron JavaScript
         run: node --check main.js && node -e "JSON.parse(require('fs').readFileSync('config.json','utf8')); JSON.parse(require('fs').readFileSync('package.json','utf8')); console.log('Configurações válidas.')"
         working-directory: desktop
+      - name: Validate Windows Glass Neon UI integration
+        run: npm run test:ui
+        working-directory: desktop
 
   android-check:
     runs-on: ubuntu-latest
