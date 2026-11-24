@@ -2,6 +2,12 @@ name: Build Fluxo Lab installers
 
 on:
   workflow_dispatch:
+    inputs:
+      build_android:
+        description: 'Gerar Android somente quando explicitamente solicitado'
+        required: false
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -38,6 +44,7 @@ jobs:
           retention-days: 30
 
   android:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_android }}
     name: Android APK (assinatura permanente)
     runs-on: ubuntu-latest
     steps:
