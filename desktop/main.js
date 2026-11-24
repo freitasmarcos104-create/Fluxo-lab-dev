@@ -6,6 +6,18 @@ const path = require('node:path');
 
 const CONFIG_PATH = path.join(__dirname, 'config.json');
 const FALLBACK_URL = 'https://app.markfree.com.br/';
+const GLASS_NEON_CSS_PATH = path.join(__dirname, 'glass-neon-buttons.css');
+
+function readGlassNeonStylesheet() {
+  try {
+    return fs.readFileSync(GLASS_NEON_CSS_PATH, 'utf8');
+  } catch (error) {
+    console.error('Não foi possível carregar o tema Glass Neon do Windows:', error);
+    return '';
+  }
+}
+
+const glassNeonStylesheet = readGlassNeonStylesheet();
 
 function readConfig() {
   try {
@@ -89,6 +101,14 @@ function createWindow() {
 
   win.webContents.on('did-fail-load', (_event, errorCode, _description, _validatedURL, isMainFrame) => {
     if (isMainFrame && errorCode !== -3) showConnectionError(win);
+  });
+
+  // Tema do aplicativo Windows: não altera o Worker, o navegador ou o cliente Android.
+  // Reaplica após navegações completas; o CSS permanece em navegações internas da SPA.
+  win.webContents.on('did-finish-load', () => {
+    if (!glassNeonStylesheet || !isInternalUrl(win.webContents.getURL())) return;
+    win.webContents.insertCSS(glassNeonStylesheet)
+      .catch(error => console.error('Falha ao aplicar o Glass Neon no Windows:', error));
   });
 
   win.webContents.on('page-title-updated', event => {
