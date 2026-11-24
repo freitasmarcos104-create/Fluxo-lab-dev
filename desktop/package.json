@@ -9,7 +9,8 @@
   "scripts": {
     "start": "electron .",
     "dist:win": "electron-builder --win nsis",
-    "dist:portable": "electron-builder --win portable"
+    "dist:portable": "electron-builder --win portable",
+    "test:ui": "node --test tests/glass-neon.test.mjs"
   },
   "devDependencies": {
     "electron": "45.3.2",
