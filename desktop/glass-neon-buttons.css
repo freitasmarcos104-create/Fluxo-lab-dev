@@ -11,8 +11,7 @@
 }
 
 /* Não modificar ações de perigo/alerta nem elementos explicitamente isentos. */
-:is(button, .btn, [role="button"], input[type="button"], input[type="submit"])
-:not(:is(
+:is(button, .btn, [role="button"], input[type="button"], input[type="submit"]):not(:is(
   [disabled], [aria-disabled="true"], [data-no-glass-neon],
   .danger, .btn-danger, .warning, .btn-warning,
   [class*="danger" i], [class*="delete" i], [class*="excluir" i],
@@ -44,8 +43,7 @@
 }
 
 /* Reflexo curvo sobre a metade superior (efeito de vidro da referência). */
-:is(button, .btn, [role="button"])
-:not(:is(
+:is(button, .btn, [role="button"]):not(:is(
   [disabled], [aria-disabled="true"], [data-no-glass-neon],
   .danger, .btn-danger, .warning, .btn-warning,
   [class*="danger" i], [class*="delete" i], [class*="excluir" i],
@@ -70,8 +68,7 @@
 }
 
 /* Reflexo diagonal discreto na parte interna inferior. */
-:is(button, .btn, [role="button"])
-:not(:is(
+:is(button, .btn, [role="button"]):not(:is(
   [disabled], [aria-disabled="true"], [data-no-glass-neon],
   .danger, .btn-danger, .warning, .btn-warning,
   [class*="danger" i], [class*="delete" i], [class*="excluir" i],
@@ -92,8 +89,7 @@
   background: linear-gradient(160deg, transparent 12%, rgba(0, 184, 195, .14) 58%, transparent 95%);
 }
 
-:is(button, .btn, [role="button"], input[type="button"], input[type="submit"])
-:not(:is(
+:is(button, .btn, [role="button"], input[type="button"], input[type="submit"]):not(:is(
   [disabled], [aria-disabled="true"], [data-no-glass-neon],
   .danger, .btn-danger, .warning, .btn-warning,
   [class*="danger" i], [class*="delete" i], [class*="excluir" i],
@@ -111,8 +107,7 @@
     0 0 23px rgba(20, 242, 232, .44) !important;
 }
 
-:is(button, .btn, [role="button"], input[type="button"], input[type="submit"])
-:not(:is(
+:is(button, .btn, [role="button"], input[type="button"], input[type="submit"]):not(:is(
   [disabled], [aria-disabled="true"], [data-no-glass-neon],
   .danger, .btn-danger, .warning, .btn-warning,
   [class*="danger" i], [class*="delete" i], [class*="excluir" i],
