@@ -44,6 +44,8 @@ jobs:
         run: node --test tests/remessas-proteses.test.mjs
       - name: Validate remittance scan and mesh alerts
         run: node --test tests/impedimentos-remessa.test.mjs
+      - name: Validate employee designated queue alerts
+        run: node --test tests/avisos-fila-funcionario.test.mjs
       - name: Validate deployment safety contract
         run: node --test tests/deployment-pipeline.test.mjs
 
