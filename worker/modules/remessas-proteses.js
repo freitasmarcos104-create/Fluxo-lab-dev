@@ -1,7 +1,13 @@
+import { nomesTiposMunicipais } from "./trabalhos-municipais.js";
 import { lerImpedimentoV516, renderAvisoRemessaV516, renderFormImpedimentoRemessaV516 } from "./impedimentos-remessa.js";
 
 export function selecaoProtesesRemessaV515(paciente) {
-  const origem=[paciente?.superior_tipo,paciente?.inferior_tipo];
+  const origem=[
+    paciente?.superior_tipo,
+    paciente?.inferior_tipo,
+    ...String(paciente?.tipos_superior || "").split(","),
+    ...String(paciente?.tipos_inferior || "").split(",")
+  ];
   const encontrados=new Set();
   for(const valor of origem) {
     let tipo=String(valor??"").trim().toUpperCase();
@@ -15,7 +21,7 @@ export function selecaoProtesesRemessaV515(paciente) {
 
 export function rotuloSelecaoProtesesRemessaV515(paciente) {
   const tipos=selecaoProtesesRemessaV515(paciente);
-  return tipos.length?tipos.join(" + "):"Sem prótese";
+  return tipos.length ? tipos.map((tipo) => nomesTiposMunicipais(tipo)[0] || tipo).join(" + ") : "Sem prótese";
 }
 
 export function classificacaoProtesesRemessaV515(paciente) {
@@ -28,9 +34,9 @@ export function escaparHtmlProtesesV515(valor) {
 }
 
 export function renderBadgesProtesesRemessaV515(paciente) {
-  const tipos=selecaoProtesesRemessaV515(paciente);
-  const combinado=tipos.length>1;
-  return `<span class="badge ${!tipos.length?"neutro":combinado?"andamento":"ok"}" style="display:inline-block;margin-top:4px;white-space:normal" aria-label="Próteses selecionadas: ${escaparHtmlProtesesV515(rotuloSelecaoProtesesRemessaV515(paciente))}">${escaparHtmlProtesesV515(rotuloSelecaoProtesesRemessaV515(paciente))}</span>`;
+  const rotulo = rotuloSelecaoProtesesRemessaV515(paciente);
+  const combinado = rotulo.includes(" + ");
+  return `<span class="badge ${rotulo === "Sem prótese"?"neutro":combinado?"andamento":"ok"}" style="display:inline-block;margin-top:4px;white-space:normal" aria-label="Próteses selecionadas: ${escaparHtmlProtesesV515(rotuloSelecaoProtesesRemessaV515(paciente))}">${escaparHtmlProtesesV515(rotuloSelecaoProtesesRemessaV515(paciente))}</span>`;
 }
 
 export function iniciarControlesProtesesRemessaV515(id) {
@@ -94,8 +100,8 @@ export function renderPainelProtesesRemessaV515(pacientes, remessaId, opcoes={})
     const {dados}=flag(p);
     const nome=escaparHtmlProtesesV515(p.paciente);
     const codigo=escaparHtmlProtesesV515(p.codigo);
-    const superior=escaparHtmlProtesesV515(p.superior_tipo||"—");
-    const inferior=escaparHtmlProtesesV515(p.inferior_tipo||"—");
+    const superior=escaparHtmlProtesesV515(nomesTiposMunicipais(p.tipos_superior).join(" · ") || (p.superior_tipo === "NONE" ? "—" : p.superior_tipo || "—"));
+    const inferior=escaparHtmlProtesesV515(nomesTiposMunicipais(p.tipos_inferior).join(" · ") || (p.inferior_tipo === "NONE" ? "—" : p.inferior_tipo || "—"));
     const destino="/trabalhos/"+Number(p.id);
     const nomeVisivel=opcoes.permitirLinks?`<a href="${destino}">${nome}</a>`:nome;
     const nomeCompleto=`<strong>${nomeVisivel}</strong><div class="mini">${codigo}</div>`;

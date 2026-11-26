@@ -1,3 +1,8 @@
+import {
+  camposTrabalhosMunicipais, handleTrabalhosMunicipais, lerTrabalhosMunicipais,
+  listarDesignaveisMunicipais, listarPecasMunicipais, nomesTiposMunicipais,
+  painelPecasMunicipaisDesignadas, renderPecasMunicipais, sqlPecasMunicipaisConcluidas, sqlTiposMunicipais
+} from "./modules/trabalhos-municipais.js";
 import { gerirTrabalho, atalhosLixeira } from "./modules/gestao-trabalho.js";
 import { trabalhosClinica, podeAcessarClinica } from "./modules/trabalhos-clinica.js";
 import { obterUsuarioLogado } from "./core/auth.js";
@@ -1525,10 +1530,10 @@ async function listarRemessasMunicipioIntegradoDomainV45(env, municipio, deps = 
          WHERE t.remessa_id = r.id AND t.excluido = 0
            AND (
              t.entregue = 1
-             OR NOT EXISTS (
+             OR (NOT EXISTS (
                SELECT 1 FROM etapas e
                WHERE e.trabalho_id = t.id AND e.status != 'CONCLUIDO'
-             )
+             ) AND ${sqlPecasMunicipaisConcluidas("t")})
            )) AS digital_prontos,
 
         (SELECT COUNT(*) FROM trabalhos_convencionais tc
@@ -1566,10 +1571,10 @@ async function obterResumoRemessaIntegradaDomainV45(env, id) {
        WHERE t.remessa_id = r.id AND t.excluido = 0
          AND (
            t.entregue = 1
-           OR NOT EXISTS (
+           OR (NOT EXISTS (
              SELECT 1 FROM etapas e
              WHERE e.trabalho_id = t.id AND e.status != 'CONCLUIDO'
-           )
+           ) AND ${sqlPecasMunicipaisConcluidas("t")})
          )) AS digital_prontos,
       (SELECT COUNT(*) FROM trabalhos_convencionais tc
        WHERE tc.remessa_id = r.id AND tc.excluido = 0) AS convencional_total,
@@ -1610,10 +1615,10 @@ async function listarRemessasDomainV45(env, mes = "", usuario = null, deps = {})
        WHERE t.remessa_id = r.id AND t.excluido = 0
          AND t.entregue = 0
          ${visibilidadeV345}
-         AND NOT EXISTS (
+         AND (NOT EXISTS (
            SELECT 1 FROM etapas e
            WHERE e.trabalho_id = t.id AND e.status != 'CONCLUIDO'
-         )) AS digital_concluidos,
+         ) AND ${sqlPecasMunicipaisConcluidas("t")})) AS digital_concluidos,
 
       (SELECT COUNT(*) FROM trabalhos_convencionais tc
        WHERE tc.remessa_id = r.id AND tc.excluido = 0) AS convencional_total,
@@ -1757,10 +1762,11 @@ async function listarRemessasDigitaisV31DomainV45(env, cicloId = 0, usuario = nu
       SUM(
         CASE WHEN upper(trim(COALESCE(t.superior_tipo,''))) IN ('PT','PPR') THEN 1 ELSE 0 END
         + CASE WHEN upper(trim(COALESCE(t.inferior_tipo,''))) IN ('PT','PPR') THEN 1 ELSE 0 END
+        + (SELECT COUNT(*) FROM trabalhos_municipais tm WHERE tm.trabalho_id = t.id)
       ) AS total_proteses,
-      SUM(CASE WHEN t.id IS NOT NULL AND NOT EXISTS (
+      SUM(CASE WHEN t.id IS NOT NULL AND (NOT EXISTS (
         SELECT 1 FROM etapas e WHERE e.trabalho_id=t.id AND e.status!='CONCLUIDO'
-      ) THEN 1 ELSE 0 END) AS prontos,
+      ) AND ${sqlPecasMunicipaisConcluidas("t")}) THEN 1 ELSE 0 END) AS prontos,
       SUM(CASE WHEN t.entregue=1 THEN 1 ELSE 0 END) AS entregues,
       CAST(julianday(r.data_prevista_entrega)-julianday(date('now')) AS INTEGER) AS dias_para_entrega
     FROM remessas r
@@ -2526,7 +2532,8 @@ async function handleRemittanceCrudRoutesV46(request, env, url, caminho, deps) {
     registrarAuditoriaSistemaV31: registrarAuditoriaSistemaV312,
     isCadastro: isCadastro2,
     obterCicloDigitalV311: obterCicloDigitalV3112,
-    podeGerenciarAreaV31: podeGerenciarAreaV312
+    podeGerenciarAreaV31: podeGerenciarAreaV312,
+    podeGerirPecasMunicipais
   } = deps;
   const metodo = request.method;
   let match = null;
@@ -2540,23 +2547,41 @@ async function handleRemittanceCrudRoutesV46(request, env, url, caminho, deps) {
     if (remessa.data_finalizacao || remessa.data_entrega_real) return textResponse2("Esta remessa já foi finalizada ou entregue e não aceita novos pacientes.", 409);
     const f = await request.formData();
     const paciente = String(f.get("paciente") || "").trim();
-    const superior = String(f.get("superior_tipo") || "NONE").toUpperCase();
-    const inferior = String(f.get("inferior_tipo") || "NONE").toUpperCase();
-    const validos = ["NONE", "PT", "PPR"];
-    if (paciente.length < 2 || !validos.includes(superior) || !validos.includes(inferior) || superior === "NONE" && inferior === "NONE") {
-      return redirect2(retornoCadastroDigitalV34182(usuario, remessa.ciclo_digital_id, "erro", "Confira paciente e prótese."));
+    const selecao = lerTrabalhosMunicipais(f);
+    if (paciente.length < 2 || !selecao) {
+      return redirect2(retornoCadastroDigitalV34182(usuario, remessa.ciclo_digital_id, "erro", "Informe o paciente e selecione ao menos um trabalho."));
     }
+    if (selecao.porPeca && !podeGerirPecasMunicipais(usuario)) {
+      return textResponse2("Somente Administrador ou Gerência Digital pode cadastrar essa seleção de trabalhos.", 403);
+    }
+    const superior = selecao.porPeca ? "NONE" : selecao.superior;
+    const inferior = selecao.porPeca ? "NONE" : selecao.inferior;
     let codigo = "", criado = null;
     for (let tentativa = 0; tentativa < 5 && !criado; tentativa++) {
       codigo = await gerarCodigoTrabalho2(env);
+      const pacienteStmt = env.db.prepare(`
+        INSERT INTO trabalhos (codigo,municipio,paciente,superior_tipo,inferior_tipo,remessa_id,criado_por,criado_em,entregue,arquivado,excluido)
+        SELECT ?,trim(r.municipio),?,?,?,?,?,?,0,0,0 FROM remessas r
+        WHERE r.id = ? AND r.data_finalizacao IS NULL AND r.data_entrega_real IS NULL
+      `).bind(codigo, paciente, superior, inferior, remessa.id, usuario.id, new Date().toISOString(), remessa.id);
       try {
-        criado = await env.db.prepare(`INSERT INTO trabalhos (codigo,municipio,paciente,superior_tipo,inferior_tipo,remessa_id,criado_por,criado_em,entregue,arquivado,excluido) VALUES (?,?,?,?,?,?,?, ?,0,0,0)`).bind(codigo, String(remessa.municipio || "").trim(), paciente, superior, inferior, remessa.id, usuario.id, (/* @__PURE__ */ new Date()).toISOString()).run();
+        if (selecao.porPeca) {
+          const pecas = selecao.itens.map(({ arcada, tipo }) => env.db.prepare(`
+            INSERT INTO trabalhos_municipais (trabalho_id,arcada,tipo)
+            SELECT t.id,?,? FROM trabalhos t JOIN remessas r ON r.id = t.remessa_id
+            WHERE t.codigo = ? AND r.id = ? AND r.data_finalizacao IS NULL AND r.data_entrega_real IS NULL
+          `).bind(arcada, tipo, codigo, remessa.id));
+          [criado] = await env.db.batch([pacienteStmt, ...pecas]);
+        } else {
+          criado = await pacienteStmt.run();
+        }
       } catch (err) {
         if (!/unique|constraint/i.test(String(err?.message || err)) || tentativa === 4) throw err;
       }
     }
-    const trabalhoId = Number(criado?.meta?.last_row_id || 0);
-    await criarEtapasDoTrabalho2(env, trabalhoId, superior, inferior);
+    if (!criado?.meta?.changes) return textResponse2("Remessa encerrada durante o cadastro.", 409);
+    const trabalhoId = Number(criado.meta.last_row_id);
+    if (!selecao.porPeca) await criarEtapasDoTrabalho2(env, trabalhoId, superior, inferior);
     await registrarHistorico2(env, trabalhoId, usuario.id, "TRABALHO_CRIADO", `Trabalho ${codigo} criado dentro de ${remessa.municipio} · Remessa ${String(remessa.numero).padStart(2, "0")}.`);
     await registrarAuditoriaSistemaV312(env, usuario.id, "DIGITAL", "CRIAR_PACIENTE_REMESSA", "TRABALHO", trabalhoId, "remessa_id", null, remessa.id, null);
     return redirect2(retornoCadastroDigitalV34182(usuario, remessa.ciclo_digital_id, "ok", `${paciente} criado dentro da remessa.`));
@@ -2647,9 +2672,15 @@ async function handleRemittanceCrudRoutesV46(request, env, url, caminho, deps) {
     const id = Number(match[1]), remessa = await obterRemessa2(env, id);
     if (!remessa) return textResponse2("Remessa não encontrada.", 404);
     const f = await request.formData(), data = String(f.get("data_finalizacao") || (/* @__PURE__ */ new Date()).toISOString().slice(0, 10));
-    const c = await env.db.prepare(`SELECT COUNT(*) AS total,SUM(CASE WHEN NOT EXISTS(SELECT 1 FROM etapas e WHERE e.trabalho_id=t.id AND e.status!='CONCLUIDO') THEN 1 ELSE 0 END) AS prontos FROM trabalhos t WHERE t.remessa_id=? AND t.excluido=0`).bind(id).first();
+    const c = await env.db.prepare(`SELECT COUNT(*) AS total,SUM(CASE WHEN (NOT EXISTS(SELECT 1 FROM etapas e WHERE e.trabalho_id=t.id AND e.status!='CONCLUIDO') AND ${sqlPecasMunicipaisConcluidas("t")}) THEN 1 ELSE 0 END) AS prontos FROM trabalhos t WHERE t.remessa_id=? AND t.excluido=0`).bind(id).first();
     if (!Number(c.total || 0) || Number(c.prontos || 0) < Number(c.total || 0)) return redirect2(`/digital?ciclo=${remessa.ciclo_digital_id || 0}&erro=${encodeURIComponent("A remessa ainda possui pacientes em produção.")}`);
-    await env.db.prepare(`UPDATE remessas SET data_finalizacao=?,finalizado_por=? WHERE id=?`).bind(data, usuario.id, id).run();
+    const alteracao = await env.db.prepare(`UPDATE remessas SET data_finalizacao=?,finalizado_por=? WHERE id=?
+      AND NOT EXISTS (
+        SELECT 1 FROM trabalhos t WHERE t.remessa_id = remessas.id AND t.excluido = 0
+          AND NOT ${sqlPecasMunicipaisConcluidas("t")}
+      )
+    `).bind(data, usuario.id, id).run();
+    if (!alteracao.meta?.changes) return textResponse2("A remessa possui novos trabalhos pendentes.", 409);
     return redirect2(`/digital?ciclo=${remessa.ciclo_digital_id || 0}&ok=${encodeURIComponent("Remessa marcada como pronta para entrega.")}`);
   }
   match = caminho.match(/^\/remessas\/(\d+)\/entregar$/);
@@ -2661,10 +2692,16 @@ async function handleRemittanceCrudRoutesV46(request, env, url, caminho, deps) {
     if (!remessa) return textResponse2("Remessa não encontrada.", 404);
     const f = await request.formData(), data = String(f.get("data_entrega_real") || "").trim();
     if (!/^\d{4}-\d{2}-\d{2}$/.test(data) || data < String(remessa.data_recebimento || "")) return redirect2(`/digital?ciclo=${remessa.ciclo_digital_id || 0}&erro=${encodeURIComponent("Data de entrega inválida.")}`);
-    const c = await env.db.prepare(`SELECT COUNT(*) AS total,SUM(CASE WHEN NOT EXISTS(SELECT 1 FROM etapas e WHERE e.trabalho_id=t.id AND e.status!='CONCLUIDO') THEN 1 ELSE 0 END) AS prontos FROM trabalhos t WHERE t.remessa_id=? AND t.excluido=0`).bind(id).first();
+    const c = await env.db.prepare(`SELECT COUNT(*) AS total,SUM(CASE WHEN (NOT EXISTS(SELECT 1 FROM etapas e WHERE e.trabalho_id=t.id AND e.status!='CONCLUIDO') AND ${sqlPecasMunicipaisConcluidas("t")}) THEN 1 ELSE 0 END) AS prontos FROM trabalhos t WHERE t.remessa_id=? AND t.excluido=0`).bind(id).first();
     const total = Number(c.total || 0), prontos = Number(c.prontos || 0);
     if (total === 0 || prontos !== total) return redirect2(`/digital?ciclo=${remessa.ciclo_digital_id || 0}&erro=${encodeURIComponent(`Entrega bloqueada: ${prontos}/${total} pacientes estão prontos.`)}`);
-    await env.db.prepare(`UPDATE remessas SET data_finalizacao=COALESCE(data_finalizacao,?),finalizado_por=COALESCE(finalizado_por,?),data_entrega_real=?,entregue_por=? WHERE id=?`).bind(data, usuario.id, data, usuario.id, id).run();
+    const alteracao = await env.db.prepare(`UPDATE remessas SET data_finalizacao=COALESCE(data_finalizacao,?),finalizado_por=COALESCE(finalizado_por,?),data_entrega_real=?,entregue_por=? WHERE id=?
+      AND NOT EXISTS (
+        SELECT 1 FROM trabalhos t WHERE t.remessa_id = remessas.id AND t.excluido = 0
+          AND NOT ${sqlPecasMunicipaisConcluidas("t")}
+      )
+    `).bind(data, usuario.id, data, usuario.id, id).run();
+    if (!alteracao.meta?.changes) return textResponse2("A remessa possui novos trabalhos pendentes.", 409);
     const trabalhos = await env.db.prepare(`SELECT id FROM trabalhos WHERE remessa_id=? AND excluido=0`).bind(id).all();
     await env.db.prepare(`UPDATE trabalhos SET entregue=1,data_entrega=?,entrega_registrada_por=?,arquivado=0 WHERE remessa_id=? AND excluido=0`).bind(data, usuario.id, id).run();
     for (const t of trabalhos.results || []) await registrarHistorico2(env, t.id, usuario.id, "ENTREGA_REMESSA_COMPLETA", `Remessa ${String(remessa.numero).padStart(2, "0")} entregue integralmente em ${data}.`);
@@ -4087,7 +4124,7 @@ async function handleDigitalPackageRoutesV49(request, env, url, caminho, metodo,
     for (let i = 0; i < recebidos.length; i++) {
       const x = recebidos[i] || {}, nomeArq = String(x.nome || "").trim().slice(0, 180), ext = extensaoArquivoV3212(nomeArq), tam = Number(x.tamanho || 0);
       if (!nomeArq) return jsonResponseV322({ mensagem: "Arquivo sem nome." }, 400);
-      if (!Number.isSafeInteger(tam) || tam <= 0) return jsonResponseV322({ mensagem: `Tamanho inválido: ${nomeArq}.` }, 400);
+      if (!Number.isSafeInteger(tam) || tam <= 0) return jsonResponseV322({ mensagem: `Tamanho inválido: ${nomeArq}.`}, 400);
       lista.push({ indice: i, nome: nomeArq, caminho: caminhoRelativoSeguroV3212(x.caminho || nomeArq, nomeArq), tamanho: tam, ext, mime: mimeArquivoV3212(nomeArq, x.mime) });
       total += tam;
     }
@@ -5431,6 +5468,9 @@ function podeAcessarChatEquipeDigitalV3420(usuario) {
   // Canal geral: funcionários e perfis de gestão participam sem filtro de área.
   return podeUsarMensagensPrivadasV3420(usuario);
 }
+function podeGerirPecasMunicipais(usuario) {
+  return isAdmin(usuario) || (isGerencia(usuario) && podeGerenciarAreaV31(usuario, "DIGITAL"));
+}
 function podeCadastrarDigitalV3418(usuario) {
   return isCadastro(usuario) || podeGerenciarAreaV31(usuario, "DIGITAL");
 }
@@ -5551,6 +5591,7 @@ function clausulaVisibilidadeTrabalhoDigitalV345(usuario, aliasTrabalho = "t") {
   }
   const clausulas = [];
   const args = [];
+  clausulas.push(`EXISTS (SELECT 1 FROM trabalhos_municipais tm WHERE tm.trabalho_id = ${aliasTrabalho}.id)`);
   const setoresEtapas = setores.filter((setor) => setor !== "IMPRESSAO");
   if (setoresEtapas.length) {
     clausulas.push(`
@@ -5618,6 +5659,7 @@ function sqlVisibilidadeTrabalhoDigitalLiteralV345(usuario, aliasTrabalho = "t")
   }
   const quote = (valor) => `'${String(valor).replaceAll("'", "''")}'`;
   const clausulas = [];
+  clausulas.push(`EXISTS (SELECT 1 FROM trabalhos_municipais tm WHERE tm.trabalho_id = ${aliasTrabalho}.id)`);
   const setoresEtapas = setores.filter((setor) => setor !== "IMPRESSAO");
   if (setoresEtapas.length) {
     clausulas.push(`
@@ -9435,10 +9477,10 @@ async function dadosDashboardV26(env, inicio, fim, area) {
          WHERE t.excluido = 0 AND t.remessa_id = r.id) AS digital_total,
         (SELECT COUNT(*) FROM trabalhos t
          WHERE t.excluido = 0 AND t.remessa_id = r.id
-           AND NOT EXISTS (
+           AND (NOT EXISTS (
              SELECT 1 FROM etapas e
              WHERE e.trabalho_id = t.id AND e.status != 'CONCLUIDO'
-           )) AS digital_prontos,
+           ) AND ${sqlPecasMunicipaisConcluidas("t")})) AS digital_prontos,
         (SELECT COUNT(*) FROM trabalhos_convencionais tc
          WHERE tc.excluido = 0 AND tc.remessa_id = r.id) AS convencional_total,
         (SELECT COUNT(*) FROM trabalhos_convencionais tc
@@ -9719,10 +9761,10 @@ async function listarMunicipiosResumo(env, busca = "") {
        WHERE t.excluido = 0
          AND lower(trim(t.municipio)) = m.chave
          AND t.entregue = 0
-         AND NOT EXISTS (
+         AND (NOT EXISTS (
            SELECT 1 FROM etapas e
            WHERE e.trabalho_id = t.id AND e.status != 'CONCLUIDO'
-         )) AS digital_concluidos,
+         ) AND ${sqlPecasMunicipaisConcluidas("t")})) AS digital_concluidos,
 
       (SELECT COUNT(*) FROM trabalhos t
        WHERE t.excluido = 0
@@ -10002,6 +10044,7 @@ async function listarPacientesMunicipio(env, municipio) {
       t.paciente,
       t.superior_tipo,
       t.inferior_tipo,
+      ${sqlTiposMunicipais("t")},
       t.entregue,
       t.data_entrega,
       t.arquivado,
@@ -10025,11 +10068,12 @@ async function listarPacientesMunicipio(env, municipio) {
           WHERE rt2.trabalho_id = t.id
             AND rt2.status != 'CONCLUIDO'
         ) THEN 'PENDENCIA'
-        WHEN NOT EXISTS (
+        WHEN (NOT EXISTS (
           SELECT 1 FROM etapas e
           WHERE e.trabalho_id = t.id
             AND e.status != 'CONCLUIDO'
-        ) THEN 'CONCLUIDO'
+        ) AND ${sqlPecasMunicipaisConcluidas("t")}) THEN 'CONCLUIDO'
+        WHEN EXISTS (SELECT 1 FROM trabalhos_municipais tm WHERE tm.trabalho_id = t.id AND tm.iniciado_em IS NOT NULL) THEN 'EM_PRODUCAO'
         WHEN EXISTS (
           SELECT 1 FROM etapas e
           WHERE e.trabalho_id = t.id
@@ -10293,8 +10337,8 @@ function paginaMunicipioDetalhe(usuario, municipio, pacientesDigitais, pacientes
   <td class="codigo"><a href="/trabalhos/${paciente.id}">${escapeHtml(paciente.codigo)}</a></td>
   <td>${escapeHtml(paciente.paciente)}</td>
   <td>${paciente.remessa_numero ? `Remessa ${String(paciente.remessa_numero).padStart(2, "0")}` : '<span class="badge neutro">Sem remessa</span>'}</td>
-  <td>${escapeHtml(nomeTipo(paciente.superior_tipo))}</td>
-  <td>${escapeHtml(nomeTipo(paciente.inferior_tipo))}</td>
+  <td>${escapeHtml(nomesTiposMunicipais(paciente.tipos_superior).join(" · ") || nomeTipo(paciente.superior_tipo))}</td>
+  <td>${escapeHtml(nomesTiposMunicipais(paciente.tipos_inferior).join(" · ") || nomeTipo(paciente.inferior_tipo))}</td>
   <td><span class="badge ${classeSituacao(paciente.situacao)}">${escapeHtml(nomeSituacao(paciente.situacao))}</span></td>
   <td>${paciente.entregue ? escapeHtml(formatarDataCurta(paciente.data_entrega)) : "—"}</td>
 </tr>`).join("");
@@ -11253,6 +11297,7 @@ async function listarTrabalhos(env, busca = "", pagina = 1, filtro = "ativos", r
         t.paciente,
         t.superior_tipo,
         t.inferior_tipo,
+        ${sqlTiposMunicipais("t")},
         ${sqlAvisoRemessaV516("t")} AS aviso_remessa,
         r.data_finalizacao AS remessa_finalizada_em,
         r.data_entrega_real AS remessa_entregue_em,
@@ -11380,7 +11425,7 @@ async function listarTrabalhos(env, busca = "", pagina = 1, filtro = "ativos", r
           THEN
             'PENDENCIA'
 
-          WHEN NOT EXISTS (
+          WHEN (NOT EXISTS (
 
             SELECT 1
 
@@ -11392,10 +11437,13 @@ async function listarTrabalhos(env, busca = "", pagina = 1, filtro = "ativos", r
 
               AND e.status !=
                 'CONCLUIDO'
-          )
+          ) AND ${sqlPecasMunicipaisConcluidas("t")})
 
           THEN
             'CONCLUIDO'
+
+          WHEN EXISTS (SELECT 1 FROM trabalhos_municipais tm WHERE tm.trabalho_id = t.id AND tm.iniciado_em IS NOT NULL)
+            THEN 'EM_PRODUCAO'
 
           WHEN EXISTS (
 
@@ -11551,6 +11599,7 @@ async function listarProtesesRemessaV515(env, remessaId, usuario) {
   const acesso = clausulaVisibilidadeTrabalhoDigitalV345(usuario, "t");
   const resultado = await env.db.prepare(`
     SELECT t.id, t.codigo, t.paciente, t.remessa_id, t.superior_tipo, t.inferior_tipo,
+      ${sqlTiposMunicipais("t")},
       ${sqlAvisoRemessaV516("t")} AS aviso_remessa
     FROM trabalhos t
     WHERE t.remessa_id = ? AND t.excluido = 0 ${acesso.sql}
@@ -13302,7 +13351,7 @@ Adicionar à remessa
 </div>
 `;
 }
-function paginaFicha(usuario, trabalho, etapas, componentes, retrabalhos, mensagens, remessas, arquivosStl = [], armazenamentoStl = null, responsaveisProjetos = [], mensagem = "", tipo = "sucesso") {
+function paginaFicha(usuario, trabalho, etapas, componentes, retrabalhos, mensagens, remessas, arquivosStl = [], armazenamentoStl = null, responsaveisProjetos = [], mensagem = "", tipo = "sucesso", painelMunicipal = "") {
   const etapasSuperior = etapas.filter(
     (etapa) => etapa.arcada === "SUPERIOR"
   );
@@ -13449,9 +13498,7 @@ Superior
 
 <strong>
 ${escapeHtml(
-      nomeTipo(
-        trabalho.superior_tipo
-      )
+      nomesTiposMunicipais(trabalho.tipos_superior).join(" · ") || nomeTipo(trabalho.superior_tipo)
     )}
 </strong>
 
@@ -13465,9 +13512,7 @@ Inferior
 
 <strong>
 ${escapeHtml(
-      nomeTipo(
-        trabalho.inferior_tipo
-      )
+      nomesTiposMunicipais(trabalho.tipos_inferior).join(" · ") || nomeTipo(trabalho.inferior_tipo)
     )}
 </strong>
 
@@ -13512,7 +13557,7 @@ ${armazenamentoStl ? blocoArquivosStlV32(
       armazenamentoStl
     ) : ""}
 
-${blocoArcada(
+${painelMunicipal || `${blocoArcada(
       usuario,
       "Superior",
       trabalho.superior_tipo,
@@ -13529,6 +13574,8 @@ ${blocoArcada(
       componentesInferior,
       responsaveisProjetos
     )}
+
+`}
 
 ${blocoRetrabalhos(
       usuario,
@@ -19141,9 +19188,9 @@ async function dadosInicioV31(env, usuario) {
       SELECT
         COUNT(*) AS total,
         SUM(CASE WHEN t.entregue=1 THEN 1 ELSE 0 END) AS entregues,
-        SUM(CASE WHEN t.entregue=0 AND NOT EXISTS (
+        SUM(CASE WHEN t.entregue=0 AND (NOT EXISTS (
           SELECT 1 FROM etapas e WHERE e.trabalho_id=t.id AND e.status!='CONCLUIDO'
-        ) THEN 1 ELSE 0 END) AS prontos,
+        ) AND ${sqlPecasMunicipaisConcluidas("t")}) THEN 1 ELSE 0 END) AS prontos,
         (SELECT COUNT(*) FROM remessas r WHERE r.data_entrega_real IS NULL AND EXISTS (
           SELECT 1 FROM trabalhos tx WHERE tx.remessa_id=r.id AND tx.excluido=0
           ${visibilidadeRemessaV345}
@@ -19190,6 +19237,7 @@ async function dadosCadastroV3418(env, cicloId = 0) {
     `).bind(ciclo.id).all(),
     env.db.prepare(`
       SELECT t.id,t.codigo,t.paciente,t.municipio,t.superior_tipo,t.inferior_tipo,t.remessa_id,t.criado_em,
+        ${sqlTiposMunicipais("t")},
         ${sqlAvisoRemessaV516("t")} AS aviso_remessa
       FROM trabalhos t
       INNER JOIN remessas r ON r.id=t.remessa_id
@@ -19247,8 +19295,7 @@ function paginaCadastroV3418(usuario, dados, mensagem = "", tipo = "sucesso") {
           <form method="POST" action="/remessas/${Number(r.id)}/novo-paciente" style="margin-top:10px"><div class="form-grid">
             <label class="full">Município<input value="${escapeHtml(r.municipio)}" readonly></label>
             <label>Paciente<input name="paciente" required minlength="2"></label>
-            <label>Arcada superior<select name="superior_tipo"><option value="NONE">Sem trabalho</option><option value="PT">Prótese total</option><option value="PPR">PPR flex</option></select></label>
-            <label>Arcada inferior<select name="inferior_tipo"><option value="NONE">Sem trabalho</option><option value="PT">Prótese total</option><option value="PPR">PPR flex</option></select></label>
+            ${camposTrabalhosMunicipais(podeGerirPecasMunicipais(usuario))}
             <div class="full"><button>Criar paciente na remessa</button></div>
           </div></form>
         </details>
@@ -19397,7 +19444,7 @@ function paginaDigitalV31(usuario, dados, cicloId, mensagem = "", tipo = "sucess
       <div style="height:8px;background:#20292f;border-radius:999px;overflow:hidden"><div id="barra-remessa-v323-${r.id}" style="height:100%;width:${percentual}%;background:currentColor;opacity:.65"></div></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:14px"><a class="botao botao-sec" href="/trabalhos?remessa=${r.id}#lista-pacientes-digitais">Abrir pacientes</a>${podeImportarFolhasV330(usuario) && !fechada ? `<a class="botao botao-sec" href="/remessas/${r.id}/importar-folhas">Importar foto / PDF</a>` : ""}${pronta && podeGerenciar ? `<form method="POST" action="/remessas/${r.id}/entregar" style="display:flex;gap:6px;align-items:end"><label style="margin:0">Data da entrega<input type="date" name="data_entrega_real" required value="${(/* @__PURE__ */ new Date()).toISOString().slice(0, 10)}"></label><button>Registrar entrega completa</button></form>` : ""}</div>
       ${podeGerenciar && !fechada ? blocoCadastroRapidoV323(r) : ""}
-      ${podeGerenciar && !fechada ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:800">+ Cadastro individual</summary><form method="POST" action="/remessas/${r.id}/novo-paciente" style="margin-top:10px"><div class="form-grid"><label class="full">Município<input value="${escapeHtml(r.municipio)}" readonly></label><label>Paciente<input name="paciente" required minlength="2"></label><label>Arcada superior<select name="superior_tipo"><option value="NONE">Sem trabalho</option><option value="PT">Prótese total</option><option value="PPR">PPR flex</option></select></label><label>Arcada inferior<select name="inferior_tipo"><option value="NONE">Sem trabalho</option><option value="PT">Prótese total</option><option value="PPR">PPR flex</option></select></label><div class="full"><button>Criar paciente na remessa</button></div></div></form></details>` : ""}
+      ${podeGerenciar && !fechada ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:800">+ Cadastro individual</summary><form method="POST" action="/remessas/${r.id}/novo-paciente" style="margin-top:10px"><div class="form-grid"><label class="full">Município<input value="${escapeHtml(r.municipio)}" readonly></label><label>Paciente<input name="paciente" required minlength="2"></label>${camposTrabalhosMunicipais(podeGerirPecasMunicipais(usuario))}<div class="full"><button>Criar paciente na remessa</button></div></div></form></details>` : ""}
       ${podeGerenciar && fechada ? `<div class="info" style="margin-top:12px"><strong>🔒 Remessa encerrada · somente consulta.</strong><br>Novos pacientes, cadastro em lote, importação e vínculos estão bloqueados. Para novos pacientes, crie uma nova remessa.</div>` : ""}
       ${podeGerenciar ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:800">Editar remessa / município</summary><form method="POST" action="/remessas/${r.id}/editar" style="margin-top:10px"><div class="form-grid"><label>Município<input name="municipio" required minlength="2" maxlength="120" value="${escapeHtml(r.municipio)}"></label><label>Recebimento<input type="date" name="data_recebimento" required value="${escapeHtml(String(r.data_recebimento || "").slice(0, 10))}"></label><label>Previsão de entrega<input type="date" name="data_prevista_entrega" required value="${escapeHtml(String(r.data_prevista_entrega || "").slice(0, 10))}"></label>${r.data_entrega_real ? `<label>Entrega realizada<input type="date" name="data_entrega_real" value="${escapeHtml(entregaAtual)}"></label>` : ""}<label class="full">Observação<input name="observacao" maxlength="500" value="${escapeHtml(r.observacao || "")}"></label><label class="full">Motivo da alteração<input name="motivo" minlength="3" required placeholder="Ex.: ajuste da previsão de entrega"></label><div class="full"><button>Salvar alterações</button></div></div></form></details>` : ""}
       ${podeGerenciar && !fechada ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-weight:700">Vincular paciente antigo sem remessa</summary>${elegiveis.length ? `<form method="POST" action="/remessas/${r.id}/vincular-paciente" style="margin-top:10px"><label>Paciente<select name="trabalho_id" required><option value="">Selecione</option>${elegiveis.map((p) => `<option value="${p.id}">${escapeHtml(p.paciente)} · ${escapeHtml(p.codigo)}</option>`).join("")}</select></label><button>Vincular</button></form>` : `<p class="nota">Nenhum paciente antigo sem remessa neste município.</p>`}</details>` : ""}
@@ -21229,7 +21276,7 @@ async function salvarFechamentoAreaV31(env, usuario, ano, mes, area, observacao 
   const dados = await dadosRelatorioAreaV31(env, area, periodoMes.inicio, periodoMes.fim);
   let extras = [];
   if (area === "DIGITAL") {
-    extras = (await env.db.prepare(`SELECT r.id,r.municipio,r.numero,r.data_recebimento,r.data_prevista_entrega,r.data_finalizacao,r.data_entrega_real,COUNT(t.id) AS total_trabalhos,SUM(CASE WHEN t.id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM etapas e WHERE e.trabalho_id=t.id AND e.status!='CONCLUIDO') THEN 1 ELSE 0 END) AS concluidos FROM remessas r INNER JOIN trabalhos t ON t.remessa_id=r.id AND t.excluido=0 WHERE date(r.data_recebimento)<=date(?) AND (r.data_entrega_real IS NULL OR date(r.data_entrega_real)>=date(?)) GROUP BY r.id ORDER BY r.id`).bind(periodoMes.fim, periodoMes.inicio).all()).results || [];
+    extras = (await env.db.prepare(`SELECT r.id,r.municipio,r.numero,r.data_recebimento,r.data_prevista_entrega,r.data_finalizacao,r.data_entrega_real,COUNT(t.id) AS total_trabalhos,SUM(CASE WHEN t.id IS NOT NULL AND (NOT EXISTS(SELECT 1 FROM etapas e WHERE e.trabalho_id=t.id AND e.status!='CONCLUIDO') AND ${sqlPecasMunicipaisConcluidas("t")}) THEN 1 ELSE 0 END) AS concluidos FROM remessas r INNER JOIN trabalhos t ON t.remessa_id=r.id AND t.excluido=0 WHERE date(r.data_recebimento)<=date(?) AND (r.data_entrega_real IS NULL OR date(r.data_entrega_real)>=date(?)) GROUP BY r.id ORDER BY r.id`).bind(periodoMes.fim, periodoMes.inicio).all()).results || [];
   } else {
     const ciclos = (await env.db.prepare(`SELECT id,nome FROM ciclos_convencionais WHERE date(data_inicio)<=date(?) AND date(data_fim)>=date(?) ORDER BY id`).bind(periodoMes.fim, periodoMes.inicio).all()).results || [];
     for (const c of ciclos) {
@@ -26493,7 +26540,12 @@ async function rotearV31Base(request, env, url, caminho) {
     await registrarAuditoriaSistemaV31(env, usuario.id, "DIGITAL", "CRIAR_CICLO_DIGITAL", "CICLO_DIGITAL", id, null, null, `${nome} · ${inicio} a ${fim}`, null);
     return redirect(`/digital?ciclo=${id}&ok=${encodeURIComponent(`Ciclo ${nome} criado e ativado.`)}`);
   }
-  const respostaRemessasV46 = await handleRemittanceCrudRoutesV46(request, env, url, caminho, { obterUsuarioLogado, redirect, podeCadastrarDigitalV3418, textResponse, obterRemessa, retornoCadastroDigitalV3418, gerarCodigoTrabalho, criarEtapasDoTrabalho, registrarHistorico, registrarAuditoriaSistemaV31, isCadastro, obterCicloDigitalV311, podeGerenciarAreaV31 });
+  const respostaTrabalhoMunicipal = await handleTrabalhosMunicipais(request, env, caminho, {
+    obterUsuarioLogado, redirect, textResponse, isAdmin, podeGerirPecasMunicipais,
+    usuarioTemAreaDigital, registrarHistorico
+  });
+  if (respostaTrabalhoMunicipal) return respostaTrabalhoMunicipal;
+  const respostaRemessasV46 = await handleRemittanceCrudRoutesV46(request, env, url, caminho, { obterUsuarioLogado, redirect, podeCadastrarDigitalV3418, textResponse, obterRemessa, retornoCadastroDigitalV3418, gerarCodigoTrabalho, criarEtapasDoTrabalho, registrarHistorico, registrarAuditoriaSistemaV31, isCadastro, obterCicloDigitalV311, podeGerenciarAreaV31, podeGerirPecasMunicipais });
   if (respostaRemessasV46) return respostaRemessasV46;
   const respostaStlStorageV49 = await handleStlStorageRoutesV49(request, env, url, caminho, metodo, { cabecalhosSegurancaV30, formatarBytesV32, htmlResponse, isCoord, jsonResponseV32, listarStlLiberadosV32, nomeDownloadSeguroV32, obterArquivoStlV32, obterTrabalho, obterUsuarioLogado, paginaArmazenamentoStlV32, podeGerenciarAreaV31, redirect, registrarAuditoriaSistemaV31, registrarHistorico, resumoArmazenamentoStlV32, stlLiberadoExclusaoV32, textResponse, totalRealBucketV32, usuarioPodeVerTrabalhoDigitalV345, usuarioTemAreaDigital });
   if (respostaStlStorageV49) return respostaStlStorageV49;
@@ -30066,6 +30118,19 @@ const legacy = {
             404
           );
         }
+        const pecasMunicipais = await listarPecasMunicipais(env.db, id);
+        for (const arcada of ["SUPERIOR", "INFERIOR"]) {
+          trabalho["tipos_" + arcada.toLowerCase()] = pecasMunicipais.filter((peca) => peca.arcada === arcada).map((peca) => peca.tipo).join(",");
+        }
+        const remessaPecas = pecasMunicipais.length && trabalho.remessa_id ? await obterRemessa(env, trabalho.remessa_id) : null;
+        const painelMunicipal = renderPecasMunicipais(pecasMunicipais, usuario, {
+          ativo: Boolean(remessaPecas && !remessaPecas.data_finalizacao && !remessaPecas.data_entrega_real
+            && !trabalho.entregue && !trabalho.arquivado && !trabalho.excluido),
+          gestao: podeGerirPecasMunicipais(usuario),
+          admin: isAdmin(usuario),
+          equipe: pecasMunicipais.length && isAdmin(usuario) ? await listarDesignaveisMunicipais(env.db) : [],
+          escapeHtml
+        });
         return htmlResponse(
           paginaFicha(
             usuario,
@@ -30104,7 +30169,8 @@ const legacy = {
             ) || "",
             url.searchParams.get(
               "erro"
-            ) ? "erro" : "sucesso"
+            ) ? "erro" : "sucesso",
+            painelMunicipal
           )
         );
       }
@@ -31119,7 +31185,8 @@ async function rotaMeusV338(request, env, url, caminho) {
   const { designados, livres } = separarFilaDesignacaoV3414(operacionais);
   const conteudo = `${secaoFilaCompletaV3414(u, designados, "★ Designados a mim", "Prioridade: trabalhos atribuídos diretamente a você que já podem ser executados, incluindo os que estão em andamento.", true)}${secaoFilaCompletaV3414(u, livres, "○ Sem designação", "Trabalhos livres deste setor que já podem ser iniciados.")}${aguardando.length ? detalhesAguardandoV354(secaoFilaCompletaV3414(u, aguardando, "Pacientes aguardando", "Ainda dependem do setor anterior."), aguardando.length) : ""}`;
   const seletor = seletorFilaSetorV353(d);
-  return htmlResponse(layout(`<h1>Minha fila Digital · V${VERSAO_FLUXO_LAB}</h1><p>Escolha o setor para trabalhar com uma fila por vez. A lista principal mostra somente o que pode ser executado agora; trabalhos bloqueados pelo setor anterior ficam separados e recolhidos abaixo.</p>${seletor}${resumoMeusV338(d)}${conteudo}<nav style="display:flex;gap:16px;margin:20px 0">${d.pagina > 1 ? `<a href="${escapeHtml(urlFilaSetorV353(d.setorAtivo, d.pagina - 1))}">Anterior</a>` : ""}<span>Página ${d.pagina} de ${d.paginas}</span>${d.pagina < d.paginas ? `<a href="${escapeHtml(urlFilaSetorV353(d.setorAtivo, d.pagina + 1))}">Próxima</a>` : ""}</nav><p class="nota">A paginação continua por paciente, não por arcada. Pacientes com tarefas operacionais vêm antes dos que aguardam setor anterior, e o setor selecionado é preservado ao trocar de página.</p>`, "Minha fila Digital", u));
+  const painelMunicipal = u.perfil === "FUNCIONARIO" ? await painelPecasMunicipaisDesignadas(env.db, u.id, escapeHtml) : "";
+  return htmlResponse(layout(`<h1>Minha fila Digital · V${VERSAO_FLUXO_LAB}</h1><p>Escolha o setor para trabalhar com uma fila por vez. A lista principal mostra somente o que pode ser executado agora; trabalhos bloqueados pelo setor anterior ficam separados e recolhidos abaixo.</p>${painelMunicipal}${seletor}${resumoMeusV338(d)}${conteudo}<nav style="display:flex;gap:16px;margin:20px 0">${d.pagina > 1 ? `<a href="${escapeHtml(urlFilaSetorV353(d.setorAtivo, d.pagina - 1))}">Anterior</a>` : ""}<span>Página ${d.pagina} de ${d.paginas}</span>${d.pagina < d.paginas ? `<a href="${escapeHtml(urlFilaSetorV353(d.setorAtivo, d.pagina + 1))}">Próxima</a>` : ""}</nav><p class="nota">A paginação continua por paciente, não por arcada. Pacientes com tarefas operacionais vêm antes dos que aguardam setor anterior, e o setor selecionado é preservado ao trocar de página.</p>`, "Minha fila Digital", u));
 }
 function iniciarTemaV339() {
   const validos = ["light", "dark", "odonto-light", "odonto-dark"];
