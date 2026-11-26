@@ -262,7 +262,7 @@ async function obterUsuarioV31ServiceV53(env, id) {
   `).bind(id).first();
 }
 async function listarFuncionariosV31ServiceV53(env, area = "") {
-  const areaFiltro = ["DIGITAL", "CONVENCIONAL"].includes(area) ? area : "";
+  const areaFiltro = area === "DIGITAL" ? "DIGITAL" : "";
   const resultado = await env.db.prepare(`
     SELECT
       u.id, u.nome, u.usuario, u.perfil, u.ativo, u.setor, u.setor_convencional, u.area_producao,
@@ -292,9 +292,8 @@ async function listarFuncionariosV31ServiceV53(env, area = "") {
 async function sincronizarPermissoesFuncionarioV31ServiceV53(env, funcionarioId, setoresDigitais, setoresConvencionais, autorId) {
   await env.db.prepare(`UPDATE usuario_areas SET ativo = 0, atualizado_em = CURRENT_TIMESTAMP WHERE usuario_id = ?`).bind(funcionarioId).run();
   await env.db.prepare(`UPDATE usuario_setores SET ativo = 0, atualizado_em = CURRENT_TIMESTAMP WHERE usuario_id = ?`).bind(funcionarioId).run();
-  const areas = [];
-  if (setoresDigitais.length) areas.push("DIGITAL");
-  if (setoresConvencionais.length) areas.push("CONVENCIONAL");
+  const areas = setoresDigitais.length ? ["DIGITAL"] : [];
+  setoresConvencionais = [];
   for (const area of areas) {
     await env.db.prepare(`
       INSERT INTO usuario_areas (usuario_id, area, ativo, participa_bonificacao, criado_por, atualizado_em)
@@ -311,19 +310,11 @@ async function sincronizarPermissoesFuncionarioV31ServiceV53(env, funcionarioId,
       DO UPDATE SET ativo = 1, atualizado_em = CURRENT_TIMESTAMP
     `).bind(funcionarioId, setor, autorId || null).run();
   }
-  for (const setor of setoresConvencionais) {
-    await env.db.prepare(`
-      INSERT INTO usuario_setores (usuario_id, area, setor, ativo, criado_por, atualizado_em)
-      VALUES (?, 'CONVENCIONAL', ?, 1, ?, CURRENT_TIMESTAMP)
-      ON CONFLICT(usuario_id, area, setor)
-      DO UPDATE SET ativo = 1, atualizado_em = CURRENT_TIMESTAMP
-    `).bind(funcionarioId, setor, autorId || null).run();
-  }
 }
 async function sincronizarAreaGerenciaV31ServiceV53(env, usuarioId, area, autorId) {
   await env.db.prepare(`UPDATE usuario_areas SET ativo = 0, atualizado_em = CURRENT_TIMESTAMP WHERE usuario_id = ?`).bind(usuarioId).run();
   await env.db.prepare(`UPDATE usuario_setores SET ativo = 0, atualizado_em = CURRENT_TIMESTAMP WHERE usuario_id = ?`).bind(usuarioId).run();
-  if (["DIGITAL", "CONVENCIONAL"].includes(area)) {
+  if (area === "DIGITAL") {
     await env.db.prepare(`
       INSERT INTO usuario_areas (usuario_id, area, ativo, participa_bonificacao, criado_por, atualizado_em)
       VALUES (?, ?, 1, 0, ?, CURRENT_TIMESTAMP)
@@ -339,6 +330,7 @@ async function listarAcessosV31ServiceV53(env) {
       COALESCE((SELECT GROUP_CONCAT(ua.area, '|') FROM usuario_areas ua WHERE ua.usuario_id=u.id AND ua.ativo=1),'') AS areas_v31
     FROM usuarios u
     WHERE u.perfil IN ('ADMINISTRADOR','COORDENADOR','GERENCIA','CADASTRO') AND u.excluido=0
+      AND (u.perfil!='GERENCIA' OR UPPER(COALESCE(u.area_producao,''))='DIGITAL' OR EXISTS (SELECT 1 FROM usuario_areas ua2 WHERE ua2.usuario_id=u.id AND ua2.area='DIGITAL' AND ua2.ativo=1))
     ORDER BY CASE u.perfil WHEN 'ADMINISTRADOR' THEN 1 WHEN 'COORDENADOR' THEN 2 WHEN 'GERENCIA' THEN 3 WHEN 'CADASTRO' THEN 4 ELSE 9 END, u.nome COLLATE NOCASE
   `).all();
   return resultado.results || [];
@@ -5367,7 +5359,6 @@ async function totalRealBucketV32ServiceV51(bucket) {
   return { total_bytes: total, quantidade };
 }
 const VERSAO_FLUXO_LAB = "5.9.0";
-const MODO_CONVENCIONAL_ATIVO = false;
 new TextEncoder();
 const SETORES = [
   "CAD/CAM",
@@ -5469,11 +5460,12 @@ function areasUsuarioCruV31(usuario) {
 }
 function setoresUsuarioV31(usuario, area) {
   if (!usuario) return [];
+  if (area !== "DIGITAL") return [];
   if (isCoord(usuario)) {
-    return area === "CONVENCIONAL" ? [...SETORES_CONVENCIONAIS] : [...SETORES];
+    return [...SETORES];
   }
   if (isGerencia(usuario) && areasUsuarioV31(usuario).includes(area)) {
-    return area === "CONVENCIONAL" ? [...SETORES_CONVENCIONAIS] : [...SETORES];
+    return [...SETORES];
   }
   const prefixo = `${area}:`;
   const novos = listaPipeV31(usuario.setores_v31).filter((item) => item.startsWith(prefixo)).map((item) => item.slice(prefixo.length));
@@ -5490,6 +5482,7 @@ function areaGerenciaV31(usuario) {
   return areas.length === 1 ? areas[0] : null;
 }
 function podeGerenciarAreaV31(usuario, area) {
+  if (area !== "DIGITAL") return false;
   if (isCoord(usuario)) return true;
   return isGerencia(usuario) && areasUsuarioV31(usuario).includes(area);
 }
@@ -9562,21 +9555,15 @@ function paginaDashboardV26(usuario, dados, inicio, fim, area) {
   const podeBonus = isCoord(usuario);
   const qsArea = encodeURIComponent(area);
   const linkPeriodo = (a, b) => `/dashboard?area=${qsArea}&inicio=${encodeURIComponent(a)}&fim=${encodeURIComponent(b)}`;
-  const totalParados = Number(dados.alertas.parados_digital || 0) + Number(dados.alertas.parados_convencional || 0);
+  const totalParados = Number(dados.alertas.parados_digital || 0);
   const linhasDigital = [...dados.setoresDigital.entries()].map(([setor, total]) => `
     <tr><td>${escapeHtml(setor)}</td><td style="text-align:right"><strong>${Number(total || 0)}</strong></td></tr>
   `).join("");
-  const linhasConv = [...dados.setoresConv.entries()].map(([setor, total]) => `
-    <tr><td>${escapeHtml(nomeSetorConvencional(setor))}</td><td style="text-align:right"><strong>${Number(total || 0)}</strong></td></tr>
-  `).join("");
   const alertas = [
-    area !== "CONVENCIONAL" ? { total: dados.alertas.parados_digital, titulo: "Digital em andamento há 2+ dias", href: "/trabalhos" } : null,
-    area !== "DIGITAL" ? { total: dados.alertas.parados_convencional, titulo: "Convencional em andamento há 2+ dias", href: "/convencional" } : null,
+    { total: dados.alertas.parados_digital, titulo: "Digital em andamento há 2+ dias", href: "/trabalhos" },
     { total: dados.alertas.remessas_atrasadas, titulo: "Remessas atrasadas", href: "/municipios" },
     { total: dados.alertas.remessas_prazo, titulo: "Remessas vencendo em até 3 dias", href: "/municipios" },
-    area !== "DIGITAL" ? { total: dados.alertas.qualidade, titulo: "Peças aguardando Qualidade", href: "/convencional/setor?setor=QUALIDADE" } : null,
-    area !== "DIGITAL" ? { total: dados.alertas.retrabalhos_conv, titulo: "Retrabalhos convencionais ativos", href: "/convencional" } : null,
-    area !== "DIGITAL" ? { total: dados.alertas.muflas_ativas, titulo: "Cargas de mufla em uso", href: "/convencional/muflas" } : null
+
   ].filter(Boolean);
   const cardsAlertas = alertas.map((item) => `
     <a href="${item.href}" class="card" style="text-decoration:none;color:inherit;display:block;border-left:4px solid ${Number(item.total || 0) > 0 ? "#d78b00" : "#2f9e73"}">
@@ -9588,9 +9575,7 @@ function paginaDashboardV26(usuario, dados, inicio, fim, area) {
     <tr>
       <td><strong>${indice + 1}º</strong></td>
       <td>${escapeHtml(item.nome)}</td>
-      <td>${Number(item.total || 0)}</td>
-      <td>${Number(item.digital || 0)}</td>
-      <td>${Number(item.convencional || 0)}</td>
+      <td>${Number(item.digital || item.total || 0)}</td>
       ${podeBonus ? `<td><strong>${formatarMoedaCentavosV25(item.bonus_centavos)}</strong>${Number(item.sem_regra || 0) ? `<div class="mini">${Number(item.sem_regra)} setor(es) sem regra</div>` : ""}</td>` : ""}
     </tr>
   `).join("");
@@ -9627,7 +9612,7 @@ function paginaDashboardV26(usuario, dados, inicio, fim, area) {
         <div class="form-grid">
           <label>Início<input type="date" name="inicio" value="${escapeHtml(inicio)}" required></label>
           <label>Fim<input type="date" name="fim" value="${escapeHtml(fim)}" required></label>
-          <label>Área<select name="area"><option value="AMBOS" ${area === "AMBOS" ? "selected" : ""}>Digital + Convencional</option><option value="DIGITAL" ${area === "DIGITAL" ? "selected" : ""}>Digital</option><option value="CONVENCIONAL" ${area === "CONVENCIONAL" ? "selected" : ""}>Convencional</option></select></label>
+          <input type="hidden" name="area" value="DIGITAL">
           <div style="align-self:end"><button>Atualizar dashboard</button></div>
         </div>
       </form>
@@ -9644,13 +9629,12 @@ function paginaDashboardV26(usuario, dados, inicio, fim, area) {
     <div class="grid" style="margin-bottom:22px">${cardsAlertas}</div>
 
     <div class="grid" style="margin-bottom:22px">
-      ${area !== "CONVENCIONAL" ? `<div class="card"><h2>🖥 Digital</h2><p class="nota">Produção concluída no período por setor.</p><div class="tabela-wrap"><table><thead><tr><th>Setor</th><th style="text-align:right">Produção</th></tr></thead><tbody>${linhasDigital}</tbody></table></div></div>` : ""}
-      ${area !== "DIGITAL" ? `<div class="card"><h2>🦷 Convencional</h2><p class="nota">Produção concluída no período por setor.</p><div class="tabela-wrap"><table><thead><tr><th>Setor</th><th style="text-align:right">Produção</th></tr></thead><tbody>${linhasConv}</tbody></table></div></div>` : ""}
+      <div class="card"><h2>🖥 Digital</h2><p class="nota">Produção concluída no período por setor.</p><div class="tabela-wrap"><table><thead><tr><th>Setor</th><th style="text-align:right">Operações</th></tr></thead><tbody>${linhasDigital}</tbody></table></div></div>
     </div>
 
     <div class="card" style="margin-bottom:22px">
-      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div><h2 style="margin-bottom:3px">Produção da equipe</h2><p class="nota" style="margin:0">Ranking operacional do período selecionado.</p></div><a class="botao botao-sec" href="/producao-equipe?area=${area === "CONVENCIONAL" ? "CONVENCIONAL" : "DIGITAL"}&inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}">Abrir relatório completo</a></div>
-      <div class="tabela-wrap" style="margin-top:14px"><table><thead><tr><th>#</th><th>Funcionário</th><th>Total</th><th>Digital</th><th>Convencional</th>${podeBonus ? "<th>Bonificação estimada</th>" : ""}</tr></thead><tbody>${linhasEquipe || `<tr><td colspan="${podeBonus ? 6 : 5}">Nenhuma produção encontrada no período.</td></tr>`}</tbody></table></div>
+      <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap"><div><h2 style="margin-bottom:3px">Produção da equipe</h2><p class="nota" style="margin:0">Ranking operacional do período selecionado.</p></div><a class="botao botao-sec" href="/producao-equipe?area=DIGITAL&inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}">Abrir relatório completo</a></div>
+      <div class="tabela-wrap" style="margin-top:14px"><table><thead><tr><th>#</th><th>Funcionário</th><th>Operações digitais</th>${podeBonus ? "<th>Bonificação estimada</th>" : ""}</tr></thead><tbody>${linhasEquipe || `<tr><td colspan="${podeBonus ? 4 : 3}">Nenhuma produção encontrada no período.</td></tr>`}</tbody></table></div>
     </div>
 
     <div class="card">
@@ -10405,13 +10389,12 @@ function paginaFuncionarios(usuario, funcionarios, mensagem = "", tipo = "sucess
         </span>
       </td>
       <td>${escapeHtml(funcionario.setor || "—")}</td>
-      <td>${escapeHtml(nomeSetorConvencional(funcionario.setor_convencional))}</td>
       <td class="status ${funcionario.ativo ? "ativo" : "inativo"}">
         ${funcionario.ativo ? "Ativo" : "Desativado"}
       </td>
       <td>
         ${["DIGITAL", "AMBOS"].includes(funcionario.area_producao || "DIGITAL") ? `<a class="botao" style="margin:2px;padding:7px 9px" href="/funcionarios/${funcionario.id}/producao">Ver produção digital</a>` : ""}
-        ${["CONVENCIONAL", "AMBOS"].includes(funcionario.area_producao || "DIGITAL") ? `<a class="botao botao-sec" style="margin:2px;padding:7px 9px" href="/convencional/producao?funcionario=${funcionario.id}">Produção convencional</a>` : ""}
+
         ${funcionario.ativo ? `
           <a class="botao botao-sec" style="margin:2px;padding:7px 9px" href="/mensagens/${funcionario.id}">Mensagem</a>
         ` : ""}
@@ -10432,7 +10415,7 @@ function paginaFuncionarios(usuario, funcionarios, mensagem = "", tipo = "sucess
 <div class="cabecalho-pagina">
   <div>
     <h2>Funcionários</h2>
-    <p class="nota">Defina separadamente quem trabalha no Digital, Convencional ou em ambos.</p>
+    <p class="nota">Cadastre e gerencie os setores digitais de cada funcionário.</p>
   </div>
   <a class="botao" href="/">← Voltar</a>
 </div>
@@ -10450,19 +10433,13 @@ ${mensagem ? `<div class="${tipo}">${escapeHtml(mensagem)}</div>` : ""}
         Área de produção
         <select name="area_producao" required>
           <option value="DIGITAL">Digital</option>
-          <option value="CONVENCIONAL">Convencional</option>
-          <option value="AMBOS">Digital + Convencional</option>
+
         </select>
       </label>
       <label>
         Setor digital
         <select name="setor">${opcoesSetorDigital()}</select>
-        <span class="nota">Obrigatório para Digital ou Ambos.</span>
-      </label>
-      <label>
-        Setor convencional
-        <select name="setor_convencional">${opcoesSetorConvencional()}</select>
-        <span class="nota">Obrigatório para Convencional ou Ambos.</span>
+        <span class="nota">Selecione o setor digital do funcionário.</span>
       </label>
       <div class="full"><button>Cadastrar funcionário</button></div>
     </div>
@@ -10473,11 +10450,11 @@ ${mensagem ? `<div class="${tipo}">${escapeHtml(mensagem)}</div>` : ""}
 <table>
   <thead>
     <tr>
-      <th>Nome</th><th>Usuário</th><th>Área</th><th>Digital</th><th>Convencional</th><th>Status</th><th>Ação</th>
+      <th>Nome</th><th>Usuário</th><th>Área</th><th>Setor digital</th><th>Status</th><th>Ação</th>
     </tr>
   </thead>
   <tbody>
-    ${linhas || `<tr><td colspan="7">Nenhum funcionário.</td></tr>`}
+    ${linhas || `<tr><td colspan="6">Nenhum funcionário.</td></tr>`}
   </tbody>
 </table>
 </div>
@@ -10502,17 +10479,13 @@ ${mensagem ? `<div class="${tipo}">${escapeHtml(mensagem)}</div>` : ""}
     Área de produção
     <select name="area_producao" required>
       <option value="DIGITAL" ${area === "DIGITAL" ? "selected" : ""}>Digital</option>
-      <option value="CONVENCIONAL" ${area === "CONVENCIONAL" ? "selected" : ""}>Convencional</option>
-      <option value="AMBOS" ${area === "AMBOS" ? "selected" : ""}>Digital + Convencional</option>
+
+
     </select>
   </label>
   <label>
     Setor digital
     <select name="setor">${opcoesSetorDigital(funcionario.setor || "")}</select>
-  </label>
-  <label>
-    Setor convencional
-    <select name="setor_convencional">${opcoesSetorConvencional(funcionario.setor_convencional || "")}</select>
   </label>
   <label>
     Nova senha <span class="nota">(opcional)</span>
@@ -13758,7 +13731,8 @@ async function unidadesConcluidas(env, inicio, fim, usuarioId = null) {
           (
 
             SELECT
-              c.responsavel_id
+              COALESCE(e.responsavel_id, (
+                SELECT c.responsavel_id
 
             FROM componentes_impressao c
 
@@ -13779,7 +13753,8 @@ async function unidadesConcluidas(env, inicio, fim, usuarioId = null) {
               c.concluido_em DESC,
               c.id DESC
 
-            LIMIT 1
+                LIMIT 1
+              ))
 
           )
           AS usuario_id,
@@ -13886,11 +13861,7 @@ async function obterProducao(env, usuarioId, inicio, fim) {
           AND c.status =
             'CONCLUIDO'
 
-          AND date(
-            c.concluido_em
-          )
-          BETWEEN ?
-          AND ?
+          AND date(c.concluido_em, '-3 hours') BETWEEN date(?) AND date(?)
 
       `).bind(
     usuarioId,
@@ -17460,8 +17431,8 @@ function paginaProducaoConvencional(usuario, linhas, inicio, fim, funcionarioFil
 <div class="info" style="margin-top:17px"><strong>Importante:</strong> este total é de operações por setor, não de próteses únicas do laboratório. A mesma peça passa por vários setores sem inflar a quantidade de próteses.</div>
 `, "Produção convencional", usuario);
 }
-function setoresAreaBonificacaoV25(area) {
-  return area === "CONVENCIONAL" ? SETORES_CONVENCIONAIS : SETORES;
+function setoresAreaBonificacaoV25() {
+  return SETORES;
 }
 function setorValidoAreaBonificacaoV25(area, setor) {
   return setoresAreaBonificacaoV25(area).includes(setor);
@@ -17575,259 +17546,146 @@ function regraFuncionarioV25(regras, funcionarioId, dataRef = null) {
   const geral = regras.find((item) => aplicavel(item) && (item.funcionario_id === null || Number(item.funcionario_id || 0) === 0));
   return geral ? { ...geral, origem: "SETOR" } : null;
 }
-function periodoMetaMensalV312(inicio, fim) {
-  const a = String(inicio || "");
-  const b = String(fim || "");
-  if (dataIsoValidaV25(a) && dataIsoValidaV25(b) && a.slice(0, 7) === b.slice(0, 7)) {
-    const [ano, mes] = a.slice(0, 7).split("-").map(Number);
-    const ultimoDia = new Date(Date.UTC(ano, mes, 0)).getUTCDate();
-    return {
-      inicio: `${a.slice(0, 7)}-01`,
-      fim: `${a.slice(0, 7)}-${String(ultimoDia).padStart(2, "0")}`,
-      limite_dias: ultimoDia,
-      mensal: true
-    };
+function diasUteisMetaV60(inicio, fim) {
+  const a = String(inicio || "").slice(0, 10);
+  const b = String(fim || "").slice(0, 10);
+  if (!dataIsoValidaV25(a) || !dataIsoValidaV25(b) || a > b) return [];
+  const [ay, am, ad] = a.split("-").map(Number);
+  const [by, bm, bd] = b.split("-").map(Number);
+  const atual = new Date(Date.UTC(ay, am - 1, ad));
+  const limite = new Date(Date.UTC(by, bm - 1, bd));
+  const dias = [];
+  while (atual <= limite) {
+    const diaSemana = atual.getUTCDay();
+    if (diaSemana !== 0 && diaSemana !== 6) dias.push(atual.toISOString().slice(0, 10));
+    atual.setUTCDate(atual.getUTCDate() + 1);
   }
-  return {
-    inicio: a,
-    fim: b,
-    limite_dias: diasCalendarioInclusivosV25(a, b),
-    mensal: false
-  };
+  return dias;
 }
-function limiteJornadaMetaV312(inicio, fim) {
-  return Math.max(0, Number(periodoMetaMensalV312(inicio, fim).limite_dias || 0));
-}
-async function ajustesDiasV25(env, area, setor, inicio, fim) {
-  const periodoMeta = periodoMetaMensalV312(inicio, fim);
-  const resultado = await env.db.prepare(`
-    SELECT *
-    FROM ajustes_dias_bonificacao
-    WHERE area = ?
-      AND setor = ?
-      AND periodo_inicio = ?
-      AND periodo_fim = ?
-  `).bind(area, setor, periodoMeta.inicio, periodoMeta.fim).all();
-  return new Map((resultado.results || []).map((item) => [Number(item.funcionario_id), item]));
-}
-async function obterPainelProducaoEquipeV25(env, area, setor, inicio, fim) {
+async function obterPainelProducaoEquipeV25(env, area, setor, inicio, fim, unidadesPrecarregadas = null) {
   const usuariosResultado = await env.db.prepare(`
-    SELECT
-      u.id, u.nome, u.usuario, u.setor, u.setor_convencional,
-      u.area_producao, u.perfil, u.ativo, u.excluido,
-      COALESCE((
-        SELECT GROUP_CONCAT(ua.area, '|')
-        FROM usuario_areas ua
-        WHERE ua.usuario_id = u.id AND ua.ativo = 1
-      ), '') AS areas_v31,
-      COALESCE((
-        SELECT GROUP_CONCAT(us.area || ':' || us.setor, '|')
-        FROM usuario_setores us
-        WHERE us.usuario_id = u.id AND us.ativo = 1
-      ), '') AS setores_v31,
-      COALESCE((
-        SELECT GROUP_CONCAT(ua.area || ':' || ua.participa_bonificacao, '|')
-        FROM usuario_areas ua
-        WHERE ua.usuario_id = u.id AND ua.ativo = 1
-      ), '') AS bonus_areas_v31
+    SELECT u.id,u.nome,u.usuario,u.setor,u.setor_convencional,u.area_producao,u.perfil,u.ativo,u.excluido,
+      COALESCE((SELECT GROUP_CONCAT(ua.area,'|') FROM usuario_areas ua WHERE ua.usuario_id=u.id AND ua.ativo=1),'') AS areas_v31,
+      COALESCE((SELECT GROUP_CONCAT(us.area || ':' || us.setor,'|') FROM usuario_setores us WHERE us.usuario_id=u.id AND us.ativo=1),'') AS setores_v31,
+      COALESCE((SELECT GROUP_CONCAT(ua.area || ':' || ua.participa_bonificacao,'|') FROM usuario_areas ua WHERE ua.usuario_id=u.id AND ua.ativo=1),'') AS bonus_areas_v31
     FROM usuarios u
     WHERE u.perfil IN ('FUNCIONARIO','GERENCIA','COORDENADOR','ADMINISTRADOR')
     ORDER BY u.nome ASC
   `).all();
   const usuarios = usuariosResultado.results || [];
-  let unidades = [];
-  if (area === "CONVENCIONAL") {
-    unidades = await producaoDetalhadaConvencionalV25(env, setor, inicio, fim);
-  } else {
-    unidades = (await unidadesConcluidas(env, inicio, fim)).filter((item) => String(item.setor) === String(setor));
-  }
-  const porUsuario = /* @__PURE__ */ new Map();
+  const unidadesPeriodo = unidadesPrecarregadas || await unidadesConcluidas(env,inicio,fim);
+  const unidades = unidadesPeriodo.filter((item)=>String(item.setor)===String(setor));
+  const porUsuario = new Map();
   for (const item of unidades) {
-    const id = Number(item.usuario_id || 0);
+    const id=Number(item.usuario_id||0);
     if (!id) continue;
-    if (!porUsuario.has(id)) {
-      porUsuario.set(id, {
-        quantidade: 0,
-        pt: 0,
-        ppr: 0,
-        dias: /* @__PURE__ */ new Set(),
-        por_dia: /* @__PURE__ */ new Map(),
-        pacientes: /* @__PURE__ */ new Set()
-      });
-    }
-    const alvo = porUsuario.get(id);
-    alvo.quantidade += 1;
-    if (String(item.tipo_protese || "").toUpperCase() === "PT") alvo.pt += 1;
-    if (String(item.tipo_protese || "").toUpperCase() === "PPR") alvo.ppr += 1;
+    if (!porUsuario.has(id)) porUsuario.set(id,{quantidade:0,pt:0,ppr:0,dias:new Set(),por_dia:new Map(),pacientes:new Set()});
+    const alvo=porUsuario.get(id);
+    alvo.quantidade++;
+    if (String(item.tipo_protese||"").toUpperCase()==="PT") alvo.pt++;
+    if (String(item.tipo_protese||"").toUpperCase()==="PPR") alvo.ppr++;
     if (item.data) {
-      const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(item.data));
+      const dia=new Intl.DateTimeFormat("en-CA",{timeZone:"America/Sao_Paulo",year:"numeric",month:"2-digit",day:"2-digit"}).format(new Date(item.data));
       alvo.dias.add(dia);
-      alvo.por_dia.set(dia, Number(alvo.por_dia.get(dia) || 0) + 1);
+      alvo.por_dia.set(dia,Number(alvo.por_dia.get(dia)||0)+1);
     }
     if (item.trabalho_id) alvo.pacientes.add(String(item.trabalho_id));
   }
-  const [retrabalhos, regras, ajustes] = await Promise.all([
-    retrabalhosPorFuncionarioV25(env, area, setor, inicio, fim),
-    regrasBonificacaoV25(env, area, setor, inicio, fim),
-    ajustesDiasV25(env, area, setor, inicio, fim)
+  const [retrabalhos,regras]=await Promise.all([
+    retrabalhosPorFuncionarioV25(env,area,setor,inicio,fim),
+    regrasBonificacaoV25(env,area,setor,inicio,fim)
   ]);
-  const linhas = [];
+  const diasUteis=diasUteisMetaV60(inicio,fim);
+  const linhas=[];
   for (const usuario of usuarios) {
-    const atual = porUsuario.get(Number(usuario.id)) || {
-      quantidade: 0,
-      pt: 0,
-      ppr: 0,
-      dias: /* @__PURE__ */ new Set(),
-      por_dia: /* @__PURE__ */ new Map(),
-      pacientes: /* @__PURE__ */ new Set()
-    };
-    const pertenceArea = areasUsuarioV31(usuario).includes(area);
-    const pertenceSetor = usuario.perfil === "FUNCIONARIO" ? setoresUsuarioV31(usuario, area).includes(setor) : usuario.perfil === "GERENCIA" ? pertenceArea : false;
-    const relevanteAtual = Number(usuario.ativo || 0) === 1 && usuario.perfil === "FUNCIONARIO" && pertenceSetor;
-    if (!relevanteAtual && atual.quantidade === 0 && Number(retrabalhos.get(Number(usuario.id)) || 0) === 0) continue;
-    const diasDetectados = atual.dias.size;
-    const ajuste = usuario.perfil === "FUNCIONARIO" ? ajustes.get(Number(usuario.id)) || null : null;
-    const diasConsiderados = ajuste ? Number(ajuste.dias_considerados || 0) : diasDetectados;
-    const meiosPeriodos = ajuste ? Number(ajuste.meios_periodos_considerados || 0) : 0;
-    const elegivelBonus = usuarioParticipaBonusV31(usuario, area);
-    let regra = elegivelBonus ? regraFuncionarioV25(regras, usuario.id, fim) || regraFuncionarioV25(regras, usuario.id) : null;
-    let metaDiaria = regra ? Number(regra.meta_diaria || 0) : null;
-    let metaMeioPeriodo = regra ? Math.ceil(metaDiaria / 2) : null;
-    let metaPeriodo = regra ? metaDiaria * diasConsiderados + metaMeioPeriodo * meiosPeriodos : null;
-    let excedente = regra ? Math.max(0, atual.quantidade - metaPeriodo) : null;
-    let valorCentavos = regra ? Number(regra.valor_excedente_centavos || 0) : null;
-    let bonusCentavos = regra ? excedente * valorCentavos : 0;
-    if (elegivelBonus && !ajuste && atual.por_dia?.size) {
-      const segmentos = /* @__PURE__ */ new Map();
-      let producaoSemRegra = 0;
-      for (const [dia, quantidadeDia] of atual.por_dia) {
-        const rDia = regraFuncionarioV25(regras, usuario.id, dia);
-        if (!rDia) {
-          producaoSemRegra += quantidadeDia;
-          continue;
-        }
-        const chave = `${rDia.id}:${rDia.origem}`;
-        if (!segmentos.has(chave)) segmentos.set(chave, { regra: rDia, dias: 0, producao: 0 });
-        const seg = segmentos.get(chave);
-        seg.dias += 1;
-        seg.producao += quantidadeDia;
+    const atual=porUsuario.get(Number(usuario.id))||{quantidade:0,pt:0,ppr:0,dias:new Set(),por_dia:new Map(),pacientes:new Set()};
+    const pertenceArea=areasUsuarioV31(usuario).includes(area);
+    const pertenceSetor=usuario.perfil==="FUNCIONARIO"?setoresUsuarioV31(usuario,area).includes(setor):usuario.perfil==="GERENCIA"?pertenceArea:false;
+    const relevante=Number(usuario.ativo||0)===1&&usuario.perfil==="FUNCIONARIO"&&pertenceSetor;
+    if (!relevante&&atual.quantidade===0&&Number(retrabalhos.get(Number(usuario.id))||0)===0) continue;
+    const elegivel=usuarioParticipaBonusV31(usuario,area);
+    const diasDetectados=atual.dias.size;
+    let regra=elegivel?regraFuncionarioV25(regras,usuario.id,fim)||regraFuncionarioV25(regras,usuario.id):null;
+    let metaDiaria=regra?Number(regra.meta_diaria||0):null;
+    let metaPeriodo=regra?metaDiaria*diasUteis.length:null;
+    let saldoMeta=regra?atual.quantidade-metaPeriodo:null;
+    let excedente=regra?Math.max(0,saldoMeta):null;
+    let valorCentavos=regra?Number(regra.valor_excedente_centavos||0):null;
+    let bonusCentavos=regra?excedente*valorCentavos:0;
+    if (elegivel&&diasUteis.length) {
+      const segmentos=new Map();
+      const datas=[...new Set([...diasUteis,...atual.por_dia.keys()])].sort();
+      for (const dia of datas) {
+        const regraDia=regraFuncionarioV25(regras,usuario.id,dia);
+        if (!regraDia) continue;
+        const chave=`${regraDia.id}:${regraDia.origem}`;
+        if (!segmentos.has(chave)) segmentos.set(chave,{regra:regraDia,dias:0,producao:0});
+        const seg=segmentos.get(chave);
+        if (diasUteis.includes(dia)) seg.dias++;
+        seg.producao+=Number(atual.por_dia.get(dia)||0);
       }
       if (segmentos.size) {
-        let metaSomada = 0, bonusSomado = 0, excedenteSomado = 0;
+        let metaSomada=0,bonusSomado=0,excedenteSomado=0;
         for (const seg of segmentos.values()) {
-          const md = Number(seg.regra.meta_diaria || 0), mp = md * seg.dias;
-          const ex = Math.max(0, seg.producao - mp), val = Number(seg.regra.valor_excedente_centavos || 0);
-          metaSomada += mp;
-          excedenteSomado += ex;
-          bonusSomado += ex * val;
+          const mp=Number(seg.regra.meta_diaria||0)*seg.dias;
+          const ex=Math.max(0,seg.producao-mp);
+          metaSomada+=mp; excedenteSomado+=ex;
+          bonusSomado+=ex*Number(seg.regra.valor_excedente_centavos||0);
         }
-        const regs = [...segmentos.values()].map((x) => x.regra);
-        regra = regs.length === 1 ? regs[0] : { origem: "SEGMENTADA", segmentos: regs.length };
-        metaDiaria = regs.length === 1 ? Number(regs[0].meta_diaria || 0) : null;
-        metaMeioPeriodo = metaDiaria === null ? null : Math.ceil(metaDiaria / 2);
-        metaPeriodo = metaSomada;
-        excedente = excedenteSomado;
-        valorCentavos = regs.length === 1 ? Number(regs[0].valor_excedente_centavos || 0) : null;
-        bonusCentavos = bonusSomado;
-        if (producaoSemRegra > 0) regra.producao_sem_regra = producaoSemRegra;
+        const regrasAtivas=[...segmentos.values()].map(x=>x.regra);
+        regra=regrasAtivas.length===1?regrasAtivas[0]:{origem:"SEGMENTADA",segmentos:regrasAtivas.length};
+        metaDiaria=regrasAtivas.length===1?Number(regrasAtivas[0].meta_diaria||0):null;
+        metaPeriodo=metaSomada;
+        saldoMeta=atual.quantidade-metaPeriodo;
+        excedente=excedenteSomado;
+        valorCentavos=regrasAtivas.length===1?Number(regrasAtivas[0].valor_excedente_centavos||0):null;
+        bonusCentavos=bonusSomado;
       }
     }
-    linhas.push({
-      ...usuario,
-      quantidade: atual.quantidade,
-      pt: atual.pt,
-      ppr: atual.ppr,
-      pacientes: atual.pacientes.size,
-      dias_detectados: diasDetectados,
-      dias_considerados: diasConsiderados,
-      meios_periodos_considerados: meiosPeriodos,
-      ajuste,
-      regra,
-      elegivel_bonus: elegivelBonus,
-      meta_diaria: metaDiaria,
-      meta_meio_periodo: metaMeioPeriodo,
-      meta_periodo: metaPeriodo,
-      excedente,
-      valor_centavos: valorCentavos,
-      bonus_centavos: bonusCentavos,
-      retrabalhos: retrabalhos.get(Number(usuario.id)) || 0
-    });
+    linhas.push({...usuario,quantidade:atual.quantidade,pt:atual.pt,ppr:atual.ppr,pacientes:atual.pacientes.size,
+      dias_detectados:diasDetectados,dias_considerados:diasUteis.length,dias_uteis_periodo:diasUteis.length,
+      regra,elegivel_bonus:elegivel,meta_diaria:metaDiaria,meta_periodo:metaPeriodo,saldo_meta:saldoMeta,
+      excedente,valor_centavos:valorCentavos,bonus_centavos:bonusCentavos,retrabalhos:retrabalhos.get(Number(usuario.id))||0});
   }
-  linhas.sort((a, b) => {
-    const qtd = Number(b.quantidade) - Number(a.quantidade);
-    if (qtd !== 0) return qtd;
-    return String(a.nome || "").localeCompare(String(b.nome || ""), "pt-BR");
-  });
-  return { linhas, regras };
+  linhas.sort((a,b)=>Number(b.quantidade)-Number(a.quantidade)||String(a.nome||"").localeCompare(String(b.nome||""),"pt-BR"));
+  return {linhas,regras};
 }
-async function diasDetectadosFuncionarioV25(env, area, setor, funcionarioId, inicio, fim) {
-  if (area === "CONVENCIONAL") {
-    const item = await env.db.prepare(`
-      SELECT COUNT(DISTINCT date(e.concluido_em, '-3 hours')) AS total
-      FROM etapas_convencionais e
-      WHERE e.responsavel_id = ?
-        AND e.setor = ?
-        AND e.status = 'CONCLUIDO'
-        AND e.concluido_em IS NOT NULL
-        AND date(e.concluido_em, '-3 hours') BETWEEN date(?) AND date(?)
-    `).bind(funcionarioId, setor, inicio, fim).first();
-    return Number(item?.total || 0);
-  }
-  const unidades = await unidadesConcluidas(env, inicio, fim, funcionarioId);
-  return new Set(
-    unidades.filter((item) => String(item.setor) === String(setor) && item.data).map((item) => String(item.data).slice(0, 10))
-  ).size;
+async function obterPainelGeralProducaoDigitalV60(env,inicio,fim) {
+  const unidades = await unidadesConcluidas(env,inicio,fim);
+  const paineis=await Promise.all(SETORES.map(async setor=>({setor,dados:await obterPainelProducaoEquipeV25(env,"DIGITAL",setor,inicio,fim,unidades)})));
+  return {linhas:paineis.flatMap(({setor,dados})=>dados.linhas.map(linha=>({...linha,setor_painel:setor}))),regras:paineis.flatMap(({dados})=>dados.regras)};
 }
 function paginaProducaoEquipeV25(usuario, dados, area, setor, inicio, fim, mensagem = "", tipo = "sucesso", metasLideranca = []) {
   const podeBonus = isCoord(usuario);
-  const setores = setoresAreaBonificacaoV25(area);
-  const opcoesSetor = setores.map((item) => `
-    <option value="${escapeHtml(item)}" ${item === setor ? "selected" : ""}>
-      ${escapeHtml(area === "CONVENCIONAL" ? nomeSetorConvencional(item) : item)}
-    </option>
+  const setores = SETORES;
+  const opcoesSetor = `<option value="TODOS" ${setor === "TODOS" ? "selected" : ""}>Todos os setores digitais</option>` + setores.map((item) => `
+    <option value="${escapeHtml(item)}" ${item === setor ? "selected" : ""}>${escapeHtml(item)}</option>
   `).join("");
   const totalProducao = dados.linhas.reduce((s, item) => s + Number(item.quantidade || 0), 0);
   const totalRetrabalhos = dados.linhas.reduce((s, item) => s + Number(item.retrabalhos || 0), 0);
-  const funcionariosProduziram = dados.linhas.filter((item) => Number(item.quantidade || 0) > 0).length;
+  const funcionariosProduziram = new Set(dados.linhas.filter((item) => Number(item.quantidade || 0) > 0).map((item) => Number(item.id))).size;
   const totalBonus = dados.linhas.reduce((s, item) => s + Number(item.bonus_centavos || 0), 0);
   const semRegra = dados.linhas.filter((item) => !item.regra).length;
   const opcoesFuncionariosMeta = dados.linhas.filter((item) => item.perfil === "FUNCIONARIO" && item.elegivel_bonus).map((item) => `
       <option value="${item.id}">${escapeHtml(item.nome)}</option>
     `).join("");
   const linhas = dados.linhas.map((item) => {
-    const nomeSetor = area === "CONVENCIONAL" ? nomeSetorConvencional(setor) : setor;
-    const detalhesHref = area === "CONVENCIONAL" ? `/convencional/producao?funcionario=${item.id}&inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}` : `/funcionarios/${item.id}/producao?inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}`;
-    const meios = Number(item.meios_periodos_considerados || 0);
-    const diasHtml = item.ajuste ? `<strong>${item.dias_considerados} dia(s)${meios ? ` + ${meios} meio(s) período(s)` : ""}</strong><div class="mini">Detectados automaticamente: ${item.dias_detectados} dia(s) · ajuste manual</div>` : `<strong>${item.dias_considerados} dia(s)</strong><div class="mini">Automático · sem meio período manual</div>`;
+    const nomeSetor = item.setor_painel || setor;
+    const detalhesHref = `/funcionarios/${item.id}/producao?inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}`;
+    const diasHtml = `<strong>${item.dias_uteis_periodo || 0} dia(s) útil(eis)</strong><div class="mini">Segunda a sexta · produção de fim de semana também conta</div>`;
     const bonusCols = podeBonus ? `
       <td>${item.regra ? item.regra.origem === "SEGMENTADA" ? `<strong>Variável</strong><div class="mini">${Number(item.regra.segmentos || 0)} vigência(s) no período</div>` : `<strong>${item.meta_diaria}</strong><div class="mini">${item.regra.origem === "INDIVIDUAL" ? "Regra individual" : "Regra do setor"}</div>` : `<span class="badge alerta">Sem meta</span>`}</td>
       <td>${item.regra ? Number(item.meta_periodo || 0) : "—"}</td>
+      <td>${item.regra ? `<strong>${Number(item.saldo_meta || 0) > 0 ? "+" : ""}${Number(item.saldo_meta || 0)}</strong>` : "—"}</td>
       <td>${item.regra ? `<strong>${Number(item.excedente || 0)}</strong>` : "—"}</td>
       <td>${item.regra ? item.valor_centavos === null ? "Variável" : formatarMoedaCentavosV25(item.valor_centavos) : "—"}</td>
       <td>${item.regra ? `<strong style="font-size:17px">${formatarMoedaCentavosV25(item.bonus_centavos)}</strong>` : "—"}</td>
     ` : "";
-    const ajusteAcoes = podeBonus ? `
-      <details style="margin-top:7px">
-        <summary style="cursor:pointer;font-weight:700">Corrigir dias do colaborador (opcional)</summary>
-        <form method="POST" action="/producao-equipe/dias" style="margin-top:8px;min-width:260px">
-          <input type="hidden" name="funcionario_id" value="${item.id}">
-          <input type="hidden" name="area" value="${escapeHtml(area)}">
-          <input type="hidden" name="setor" value="${escapeHtml(setor)}">
-          <input type="hidden" name="inicio" value="${escapeHtml(inicio)}">
-          <input type="hidden" name="fim" value="${escapeHtml(fim)}">
-          <label>Dias completos trabalhados<input type="number" min="0" max="${limiteJornadaMetaV312(inicio, fim)}" name="dias_considerados" value="${item.dias_considerados}" required></label>
-          <label>Meios períodos trabalhados<input type="number" min="0" max="${limiteJornadaMetaV312(inicio, fim)}" name="meios_periodos_considerados" value="${Number(item.meios_periodos_considerados || 0)}" required></label>
-          <p class="mini full" style="margin:0">Use somente para corrigir férias, faltas, afastamentos ou dias de meio expediente. O ajuste vale para o mês inteiro, mesmo quando o relatório mostra apenas parte dele. Meta de meio período: ${item.meta_meio_periodo === null || item.meta_meio_periodo === void 0 ? "—" : Number(item.meta_meio_periodo)}.</p>
-          <label class="full">Motivo do ajuste<input name="motivo" minlength="3" required value="${item.ajuste ? escapeHtml(item.ajuste.motivo || "") : ""}" placeholder="Ex.: 20 dias completos + 1 meio período"></label>
-          <button style="margin-top:6px">Salvar ajuste</button>
-        </form>
-        ${item.ajuste ? `<form method="POST" action="/producao-equipe/dias" onsubmit="return confirm('Voltar para a contagem automática de dias?');"><input type="hidden" name="funcionario_id" value="${item.id}"><input type="hidden" name="area" value="${escapeHtml(area)}"><input type="hidden" name="setor" value="${escapeHtml(setor)}"><input type="hidden" name="inicio" value="${escapeHtml(inicio)}"><input type="hidden" name="fim" value="${escapeHtml(fim)}"><input type="hidden" name="automatico" value="1"><button class="botao-sec" style="margin-top:6px">Usar automático</button></form>` : ""}
-      </details>
-    ` : "";
+    const ajusteAcoes = "";
     return `
       <tr>
         <td><strong>${escapeHtml(item.nome)}</strong><div class="mini">${item.excluido ? "Excluído (histórico)" : Number(item.ativo) ? "Ativo" : "Inativo"}</div></td>
-        <td>${escapeHtml(nomeSetor)}</td>
+        <td><a href="/producao-equipe?area=DIGITAL&setor=${encodeURIComponent(nomeSetor)}&inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}#metas-bonificacoes-v3183">${escapeHtml(nomeSetor)}</a></td>
         <td><strong style="font-size:17px">${Number(item.quantidade || 0)}</strong></td>
         <td>${Number(item.pt || 0)} / ${Number(item.ppr || 0)}</td>
         <td>${Number(item.pacientes || 0)}</td>
@@ -17838,7 +17696,7 @@ function paginaProducaoEquipeV25(usuario, dados, area, setor, inicio, fim, mensa
       </tr>
     `;
   }).join("");
-  const opcoesFuncionariosLideranca = dados.linhas.filter((item) => item.perfil === "FUNCIONARIO" && Number(item.ativo) === 1 && setoresUsuarioV31(item, area).includes(setor)).map((item) => `<option value="${Number(item.id)}">${escapeHtml(item.nome)}</option>`).join("");
+  const opcoesFuncionariosLideranca = dados.linhas.filter((item) => item.perfil === "FUNCIONARIO" && Number(item.ativo) === 1 && (setor === "TODOS" || setoresUsuarioV31(item, area).includes(setor))).map((item) => `<option value="${Number(item.id)}">${escapeHtml(item.nome)}</option>`).join("");
   const nomesFuncionarios = new Map((dados.linhas || []).map((item) => [Number(item.id), item.nome]));
   const regrasBonificacaoHtml = (dados.regras || []).map((regra) => {
     const individual = Number(regra.funcionario_id || 0) > 0;
@@ -17876,7 +17734,7 @@ function paginaProducaoEquipeV25(usuario, dados, area, setor, inicio, fim, mensa
         data-fim="${escapeHtml(String(meta.vigencia_fim || "").slice(0, 10))}">Editar</button>
     </article>
   `).join("");
-  const configMetasV3183 = podeBonus ? `
+  const configMetasV3183 = podeBonus && setor !== "TODOS" ? `
     <section class="mb-shell-v3183" id="metas-bonificacoes-v3183">
       <style>
         .mb-shell-v3183{margin:0 0 20px;color:var(--texto,#173042)}
@@ -17966,7 +17824,7 @@ function paginaProducaoEquipeV25(usuario, dados, area, setor, inicio, fim, mensa
             </label>
             <button type="submit" id="bonus-salvar-v3183">Salvar regra de bonificação</button>
           </form>
-          <div class="mb-formula-v3183"><strong>Como é calculado:</strong> unidades acima da meta do período × valor por unidade excedente. Retrabalhos não entram no cálculo. A meta do período considera a jornada configurada para o mês.</div>
+          <div class="mb-formula-v3183"><strong>Como é calculado:</strong> unidades acima da meta do período × valor por unidade excedente. Retrabalhos não entram no cálculo. A meta do período é a meta diária multiplicada pelos dias úteis (segunda a sexta) do intervalo selecionado. Datas inicial e final são inclusivas; produção no fim de semana conta no total, mas não acrescenta meta.</div>
           <div class="mb-lista-titulo-v3183"><span>Regras cadastradas neste período</span><span>${(dados.regras || []).length}</span></div>
           ${regrasBonificacaoHtml || '<div class="mb-vazio-v3183">Ainda não existe uma regra de bonificação para este setor neste período.</div>'}
         </article>
@@ -18033,26 +17891,18 @@ function paginaProducaoEquipeV25(usuario, dados, area, setor, inicio, fim, mensa
     </section>
   ` : "";
   const colunasBonus = podeBonus ? `
-    <th>Meta diária</th><th>Meta do período</th><th>Excedente</th><th>Valor por excedente</th><th>Bônus estimado</th>
+    <th>Meta diária</th><th>Meta do período</th><th>Saldo</th><th>Excedente</th><th>Valor por excedente</th><th>Bônus estimado</th>
   ` : "";
   return layout(`
     <div class="cabecalho-pagina">
       <div>
         <h2>Produção da equipe</h2>
-        <p class="nota">Produção válida por setor e funcionário. Retrabalhos aparecem separados e não aumentam meta nem bonificação.</p>
+        <p class="nota">Central digital por funcionário e setor. A soma geral representa operações concluídas, não próteses únicas: uma peça pode passar por várias etapas.</p>
       </div>
       <a class="botao" href="/">← Voltar</a>
     </div>
 
     ${mensagem ? `<div class="${tipo}">${escapeHtml(mensagem)}</div>` : ""}
-
-    <div class="card" style="margin-bottom:17px">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-        <strong>Modo:</strong>
-        <a class="botao ${area === "DIGITAL" ? "" : "botao-sec"}" style="margin:0" href="/producao-equipe?area=DIGITAL&inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}">Digital</a>
-        <a class="botao ${area === "CONVENCIONAL" ? "" : "botao-sec"}" style="margin:0" href="/producao-equipe?area=CONVENCIONAL&inicio=${encodeURIComponent(inicio)}&fim=${encodeURIComponent(fim)}">Convencional</a>
-      </div>
-    </div>
 
     <div class="card" style="margin-bottom:17px">
       <form method="GET" action="/producao-equipe">
@@ -18067,27 +17917,27 @@ function paginaProducaoEquipeV25(usuario, dados, area, setor, inicio, fim, mensa
     </div>
 
     <div class="grid" style="margin-bottom:17px">
-      <div class="card"><h2>Produção válida</h2><strong style="font-size:30px">${totalProducao}</strong><p class="nota">peças/operações no setor selecionado.</p></div>
+      <div class="card"><h2>Produção válida</h2><strong style="font-size:30px">${totalProducao}</strong><p class="nota">operações concluídas no filtro. A soma geral pode contar uma peça em mais de uma etapa.</p></div>
       <div class="card"><h2>Funcionários</h2><strong style="font-size:30px">${funcionariosProduziram}</strong><p class="nota">com produção no período.</p></div>
       <div class="card"><h2>Retrabalhos</h2><strong style="font-size:30px">${totalRetrabalhos}</strong><p class="nota">separados da produção válida.</p></div>
       ${podeBonus ? `<div class="card"><h2>Bonificação</h2><strong style="font-size:30px">${formatarMoedaCentavosV25(totalBonus)}</strong><p class="nota">${semRegra} funcionário(s) sem regra aplicável.</p></div>` : ""}
     </div>
 
-    ${configMetasV3183}
+    ${setor === "TODOS" && podeBonus ? `<div class="info">Visualização geral. Para editar meta ou bonificação, selecione um setor digital específico.</div>` : configMetasV3183}
 
     <div class="tabela-wrap">
       <table>
         <thead><tr>
-          <th>Funcionário</th><th>Setor</th><th>Produção</th><th>PT / PPR</th><th>Pacientes</th><th>Dias</th>
+          <th>Funcionário</th><th>Setor</th><th>Operações</th><th>PT / PPR</th><th>Pacientes</th><th>Dias úteis da meta</th>
           ${colunasBonus}
           <th>Retrabalhos</th><th>Ações</th>
         </tr></thead>
-        <tbody>${linhas || `<tr><td colspan="${podeBonus ? 13 : 8}">Nenhum funcionário ou produção encontrado neste filtro.</td></tr>`}</tbody>
+        <tbody>${linhas || `<tr><td colspan="${podeBonus ? 14 : 8}">Nenhum funcionário ou produção encontrado neste filtro.</td></tr>`}</tbody>
       </table>
     </div>
 
     <div class="info" style="margin-top:17px">
-      <strong>Resumo do cálculo financeiro:</strong> o sistema compara a produção válida com a meta do período e calcula o bônus somente sobre o excedente. A jornada mensal pode ser ajustada pela gestão em casos especiais. Retrabalhos ficam fora da bonificação.
+      <strong>Como a meta é calculada:</strong> meta diária × dias de segunda a sexta dentro do período escolhido, incluindo as duas datas. Exemplo: 20/11 a 20/12 com 21 dias úteis e meta 14 = 294. Produção 302 gera saldo de 8 unidades excedentes. Produção aos sábados e domingos conta no total produzido, mas não aumenta a meta. Retrabalhos ficam fora da bonificação.
     </div>
   `, "Produção da equipe", usuario);
 }
@@ -18620,7 +18470,7 @@ function paginaRelatoriosV27(usuario, dados, mensagem = "", tipo = "sucesso") {
       ${dados.area !== "DIGITAL" ? `<div class="card"><h2>Convencional</h2><p><strong>${Number(dados.convencional_operacoes)}</strong> operações · <strong>${Number(dados.convencional_proteses_unicas)}</strong> próteses únicas · <strong>${Number(dados.convencional_pacientes_liberados)}</strong> pacientes liberados.</p><p class="nota">PT ${Number(dados.convencional_pt)} · PPR ${Number(dados.convencional_ppr)} · retrabalhos ${Number(dados.retrabalhos_convencional)} · reprovações Qualidade ${Number(dados.qualidade_reprovada)}</p></div>` : ""}
     </div>
     <div class="card" style="margin-bottom:17px"><h2>Produção por setor</h2><div class="tabela-wrap"><table><thead><tr><th>Área</th><th>Setor</th><th>Operações</th><th>PT</th><th>PPR</th><th>Sem classificação</th></tr></thead><tbody>${linhasSetores || `<tr><td colspan="6">Sem produção no período.</td></tr>`}</tbody></table></div></div>
-    <div class="card" style="margin-bottom:17px"><h2>Equipe</h2><div class="tabela-wrap"><table><thead><tr><th>Funcionário</th><th>Digital</th><th>Convencional</th><th>Total</th>${podeBonus ? "<th>Bonificação estimada</th>" : ""}</tr></thead><tbody>${linhasEquipe || `<tr><td colspan="${podeBonus ? 5 : 4}">Sem produção no período.</td></tr>`}</tbody></table></div></div>
+    <div class="card" style="margin-bottom:17px"><h2>Equipe</h2><div class="tabela-wrap"><table><thead><tr><th>Funcionário</th><th>Digital</th><th>Total</th>${podeBonus ? "<th>Bonificação estimada</th>" : ""}</tr></thead><tbody>${linhasEquipe || `<tr><td colspan="${podeBonus ? 5 : 4}">Sem produção no período.</td></tr>`}</tbody></table></div></div>
     <div class="card" style="margin-bottom:17px"><h2>Municípios</h2><p class="nota">Entradas e conclusões ocorridas dentro do período selecionado.</p><div class="tabela-wrap"><table><thead><tr><th>Município</th><th>Digital entrou</th><th>Digital concluiu</th><th>Convencional entrou</th><th>Convencional liberou</th><th>Remessas entregues</th></tr></thead><tbody>${linhasMunicipios || `<tr><td colspan="6">Nenhum movimento encontrado.</td></tr>`}</tbody></table></div></div>
     <div class="card"><h2>Remessas com movimento no período</h2><div class="tabela-wrap"><table><thead><tr><th>Remessa</th><th>Produção</th><th>Chegada</th><th>Finalização</th><th>Entrega</th></tr></thead><tbody>${linhasRemessas || `<tr><td colspan="5">Nenhuma remessa encontrada.</td></tr>`}</tbody></table></div></div>
     <div class="info" style="margin-top:17px"><strong>Leitura correta:</strong> operações por setor e próteses únicas são indicadores diferentes. Retrabalho nunca é somado como nova prótese ou como produção válida de bonificação.</div>
@@ -18657,7 +18507,7 @@ function paginaImpressaoRelatorioV27(usuario, dados) {
   const bonus = isCoord(usuario);
   const setores = dados.setores.map((item) => `<tr><td>${escapeHtml(item.area)}</td><td>${escapeHtml(item.area === "CONVENCIONAL" ? nomeSetorConvencional(item.setor) : item.setor)}</td><td>${Number(item.total)}</td><td>${Number(item.pt)}</td><td>${Number(item.ppr)}</td><td>${Number(item.sem_tipo || 0)}</td></tr>`).join("");
   const equipe = dados.equipe.map((item) => `<tr><td>${escapeHtml(item.nome)}</td><td>${Number(item.digital || 0)}</td><td>${Number(item.convencional || 0)}</td><td>${Number(item.total || 0)}</td>${bonus ? `<td>${escapeHtml(formatarMoedaCentavosV25(item.bonus_centavos))}</td>` : ""}</tr>`).join("");
-  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Fluxo Lab</title><style>body{font-family:Arial,sans-serif;color:#111;margin:30px}h1,h2{margin:0 0 10px}.muted{color:#666}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:20px 0}.card{border:1px solid #bbb;border-radius:8px;padding:12px}table{width:100%;border-collapse:collapse;margin:10px 0 24px}th,td{border:1px solid #bbb;padding:7px;text-align:left}th{background:#eee}.no-print{margin-bottom:20px}@media print{.no-print{display:none}body{margin:0}.cards{grid-template-columns:repeat(4,1fr)}}</style></head><body><div class="no-print"><button onclick="window.print()">Imprimir / Salvar PDF</button></div><h1>Fluxo Lab · Relatório</h1><p class="muted">${escapeHtml(formatarDataCurta(dados.inicio))} até ${escapeHtml(formatarDataCurta(dados.fim))} · ${escapeHtml(dados.area)}</p><div class="cards"><div class="card"><b>Operações</b><br>${Number(dados.digital_operacoes) + Number(dados.convencional_operacoes)}</div><div class="card"><b>Próteses únicas</b><br>${Number(dados.digital_proteses_unicas) + Number(dados.convencional_proteses_unicas)}</div><div class="card"><b>Retrabalhos</b><br>${Number(dados.retrabalhos_digital) + Number(dados.retrabalhos_convencional)}</div><div class="card"><b>Remessas entregues</b><br>${Number(dados.remessas_entregues)}</div>${bonus ? `<div class="card"><b>Bonificação</b><br>${escapeHtml(formatarMoedaCentavosV25(dados.bonus_total_centavos))}</div>` : ""}</div><h2>Setores</h2><table><thead><tr><th>Área</th><th>Setor</th><th>Operações</th><th>PT</th><th>PPR</th><th>Sem classificação</th></tr></thead><tbody>${setores}</tbody></table><h2>Equipe</h2><table><thead><tr><th>Funcionário</th><th>Digital</th><th>Convencional</th><th>Total</th>${bonus ? "<th>Bonificação</th>" : ""}</tr></thead><tbody>${equipe}</tbody></table><p class="muted">Operações por setor não equivalem a próteses únicas. Retrabalhos permanecem separados.</p></body></html>`;
+  return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório Fluxo Lab</title><style>body{font-family:Arial,sans-serif;color:#111;margin:30px}h1,h2{margin:0 0 10px}.muted{color:#666}.cards{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin:20px 0}.card{border:1px solid #bbb;border-radius:8px;padding:12px}table{width:100%;border-collapse:collapse;margin:10px 0 24px}th,td{border:1px solid #bbb;padding:7px;text-align:left}th{background:#eee}.no-print{margin-bottom:20px}@media print{.no-print{display:none}body{margin:0}.cards{grid-template-columns:repeat(4,1fr)}}</style></head><body><div class="no-print"><button onclick="window.print()">Imprimir / Salvar PDF</button></div><h1>Fluxo Lab · Relatório</h1><p class="muted">${escapeHtml(formatarDataCurta(dados.inicio))} até ${escapeHtml(formatarDataCurta(dados.fim))} · ${escapeHtml(dados.area)}</p><div class="cards"><div class="card"><b>Operações</b><br>${Number(dados.digital_operacoes) + Number(dados.convencional_operacoes)}</div><div class="card"><b>Próteses únicas</b><br>${Number(dados.digital_proteses_unicas) + Number(dados.convencional_proteses_unicas)}</div><div class="card"><b>Retrabalhos</b><br>${Number(dados.retrabalhos_digital) + Number(dados.retrabalhos_convencional)}</div><div class="card"><b>Remessas entregues</b><br>${Number(dados.remessas_entregues)}</div>${bonus ? `<div class="card"><b>Bonificação</b><br>${escapeHtml(formatarMoedaCentavosV25(dados.bonus_total_centavos))}</div>` : ""}</div><h2>Setores</h2><table><thead><tr><th>Área</th><th>Setor</th><th>Operações</th><th>PT</th><th>PPR</th><th>Sem classificação</th></tr></thead><tbody>${setores}</tbody></table><h2>Equipe</h2><table><thead><tr><th>Funcionário</th><th>Digital</th><th>Total</th>${bonus ? "<th>Bonificação</th>" : ""}</tr></thead><tbody>${equipe}</tbody></table><p class="muted">Operações por setor não equivalem a próteses únicas. Retrabalhos permanecem separados.</p></body></html>`;
 }
 async function dadosSnapshotFechamentoV27(env, ano, mes) {
   const periodoMes = periodoMesV27(ano, mes);
@@ -18813,7 +18663,7 @@ function paginaFechamentosV27(usuario, lista, mensagem = "", tipo = "sucesso") {
     <div class="cabecalho-pagina"><div><h2>▣ Fechamentos mensais</h2><p class="nota">Fotografia histórica da produção. Fechar um mês preserva os números daquele momento.</p></div><div class="acoes"><a class="botao botao-sec" href="/relatorios">Relatórios</a><a class="botao" href="/dashboard">← Dashboard</a></div></div>
     ${mensagem ? `<div class="${tipo}">${escapeHtml(mensagem)}</div>` : ""}
     ${isCoord(usuario) ? `<details class="card" open style="margin-bottom:17px"><summary style="cursor:pointer;font-weight:900">Fechar mês</summary><form method="POST" action="/fechamentos/fechar" style="margin-top:14px" onsubmit="return confirm('Fechar este mês e gravar a fotografia histórica dos dados?');"><div class="form-grid"><label>Ano<input type="number" name="ano" min="2020" max="2100" value="${anoAtual}" required></label><label>Mês<select name="mes">${nomesMesesV27().map((nome, i) => `<option value="${i + 1}" ${i + 1 === mesAtual ? "selected" : ""}>${escapeHtml(nome)}</option>`).join("")}</select></label><label class="full">Observação opcional<input name="observacao" maxlength="500" placeholder="Ex.: Fechamento conferido pela coordenação"></label><div class="full"><button>Fechar mês</button></div></div></form></details>` : ""}
-    <div class="card"><div class="tabela-wrap"><table><thead><tr><th>Mês</th><th>Status</th><th>Digital</th><th>Convencional</th><th>Remessas entregues</th>${isCoord(usuario) ? "<th>Bonificação</th>" : ""}<th>Fechado por</th><th>Ação</th></tr></thead><tbody>${linhas || `<tr><td colspan="${isCoord(usuario) ? 8 : 7}">Nenhum mês fechado ainda.</td></tr>`}</tbody></table></div></div>
+    <div class="card"><div class="tabela-wrap"><table><thead><tr><th>Mês</th><th>Status</th><th>Digital</th><th>Remessas entregues</th>${isCoord(usuario) ? "<th>Bonificação</th>" : ""}<th>Fechado por</th><th>Ação</th></tr></thead><tbody>${linhas || `<tr><td colspan="${isCoord(usuario) ? 8 : 7}">Nenhum mês fechado ainda.</td></tr>`}</tbody></table></div></div>
   `, "Fechamentos mensais", usuario);
 }
 function paginaFechamentoDetalheV27(usuario, dados, mensagem = "", tipo = "sucesso") {
@@ -18901,9 +18751,7 @@ function normalizarSetoresSelecionadosV31(valores, permitidos) {
     (valores || []).map((item) => String(item || "").trim().toUpperCase()).filter((item) => permitidos.includes(item))
   )];
 }
-function areaLegadaV31(setoresDigitais, setoresConvencionais) {
-  if (setoresDigitais.length && setoresConvencionais.length) return "AMBOS";
-  if (setoresConvencionais.length) return "CONVENCIONAL";
+function areaLegadaV31() {
   return "DIGITAL";
 }
 async function sincronizarPermissoesFuncionarioV31(env, funcionarioId, setoresDigitais, setoresConvencionais, autorId) {
@@ -18915,9 +18763,9 @@ async function sincronizarAreaGerenciaV31(env, usuarioId, area, autorId) {
 async function listarFuncionariosV31(env, area = "") {
   return await listarFuncionariosV31ServiceV53(env, area);
 }
-function checkboxesSetoresV31(area, selecionados = []) {
-  const setores = area === "CONVENCIONAL" ? SETORES_CONVENCIONAIS : SETORES;
-  const name = area === "CONVENCIONAL" ? "setores_convencionais" : "setores_digitais";
+function checkboxesSetoresV31(selecionados = []) {
+  const setores = SETORES;
+  const name = "setores_digitais";
   return `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px;margin-top:7px">
       ${setores.map((setor) => `
@@ -18934,7 +18782,7 @@ function resumoSetoresFuncionarioV31(funcionario, area) {
   return setores.length ? setores.map((s) => nomeSetorAreaV31(area, s)).join(" · ") : "—";
 }
 function paginaFuncionariosV31(usuario, funcionarios, mensagem = "", tipo = "sucesso", filtroArea = "") {
-  const linhas = funcionarios.map((f) => `
+  const linhas = funcionarios.filter((f) => usuarioTemAreaDigital(f)).map((f) => `
     <tr>
       <td><div style="display:flex;align-items:center;gap:10px"><span class="func-avatar-v311">${avatarEmojiV310(f.avatar) || (f.tem_foto ? `<img src="/foto-usuario/${Number(f.id)}" alt="" onerror="this.remove()" style="width:100%;height:100%;object-fit:cover;border-radius:50%">` : escapeHtml(String(f.nome || "U").trim().slice(0, 2).toUpperCase()))}</span><div><strong>${escapeHtml(f.nome)}</strong><div class="mini">${escapeHtml(f.usuario)}</div></div></div></td>
       <td>${usuarioTemAreaDigital(f) ? `<span class="badge neutro">Digital</span><div class="mini">${escapeHtml(resumoSetoresFuncionarioV31(f, "DIGITAL"))}</div>` : "—"}</td>
@@ -18948,7 +18796,7 @@ function paginaFuncionariosV31(usuario, funcionarios, mensagem = "", tipo = "suc
     </tr>
   `).join("");
   return layout(`
-    <div class="cabecalho-pagina"><div><h2>Equipe</h2><p class="nota">Uma pessoa pode atuar em vários setores, inclusive nas duas áreas. Produção, meta e bonificação continuam separadas por Área + Setor.</p></div><a class="botao botao-sec" href="/administracao">← Administração</a></div>
+    <div class="cabecalho-pagina"><div><h2>Equipe</h2><p class="nota">Uma pessoa pode atuar em vários setores digitais. Produção e meta são calculadas por setor.</p></div><a class="botao botao-sec" href="/administracao">← Administração</a></div>
     ${mensagem ? `<div class="${tipo}">${escapeHtml(mensagem)}</div>` : ""}
 
     <div class="card" style="margin-bottom:16px">
@@ -18958,7 +18806,7 @@ function paginaFuncionariosV31(usuario, funcionarios, mensagem = "", tipo = "suc
           <label>Nome<input name="nome" required minlength="2"></label>
           <label>Usuário<input name="usuario" required minlength="3"></label>
           <label>Senha inicial<input type="password" name="senha" required minlength="6"></label>
-          <div class="full"><strong>Digital</strong>${checkboxesSetoresV31("DIGITAL")}</div>
+          <div class="full"><strong>Digital</strong>${checkboxesSetoresV31()}</div>
           ${""}
           <div class="full"><button>Cadastrar funcionário</button></div>
         </div>
@@ -18976,7 +18824,6 @@ function paginaFuncionariosV31(usuario, funcionarios, mensagem = "", tipo = "suc
 }
 function paginaEditarFuncionarioV31(usuario, funcionario, mensagem = "", tipo = "sucesso") {
   const digitais = setoresUsuarioV31(funcionario, "DIGITAL");
-  const convencionais = setoresUsuarioV31(funcionario, "CONVENCIONAL");
   const podePromover = isAdmin(usuario);
   return layout(`
     <div class="cabecalho-pagina"><div><h2>Editar funcionário</h2><p class="nota">${escapeHtml(funcionario.nome)}</p></div><a class="botao botao-sec" href="/funcionarios">← Equipe</a></div>
@@ -18989,12 +18836,10 @@ function paginaEditarFuncionarioV31(usuario, funcionario, mensagem = "", tipo = 
         <select name="nivel_acesso">
           <option value="FUNCIONARIO" selected>Funcionário</option>
           <option value="GERENCIA_DIGITAL">Gerência Digital</option>
-          ${""}
         </select>
-        <span class="mini">Ao promover, a conta passa para Acessos e recebe visão de gestão de toda a área escolhida. Trabalhos já atribuídos ao usuário continuam vinculados ao mesmo usuário.</span>
+        <span class="mini">Ao promover, a conta passa para Acessos e recebe visão de gestão de toda a área escolhida. O histórico existente permanece vinculado ao usuário.</span>
       </label>` : `<input type="hidden" name="nivel_acesso" value="FUNCIONARIO">`}
-      <div class="full"><strong>Digital</strong>${checkboxesSetoresV31("DIGITAL", digitais)}</div>
-      <div class="full"><strong>Convencional</strong>${checkboxesSetoresV31("CONVENCIONAL", convencionais)}</div>
+      <div class="full"><strong>Digital</strong>${checkboxesSetoresV31(digitais)}</div>
       ${podePromover ? `<div class="full"><div class="alerta" style="margin:0">Promoção para Gerência é uma mudança de nível de acesso. Somente o Administrador pode realizar esta alteração e ela fica registrada na auditoria.</div></div>` : ""}
       <div class="full"><button>Salvar alterações</button></div>
     </div></form></div>
@@ -19068,7 +18913,7 @@ function paginaAcessosV31(usuario, acessos, mensagem = "", tipo = "sucesso") {
       <label>Usuário<input name="usuario" required minlength="3"></label>
       <label>Senha inicial<input type="password" name="senha" required minlength="6"></label>
       <label>Perfil<select name="perfil" required><option value="COORDENADOR">Coordenador</option><option value="GERENCIA">Gerência</option><option value="CADASTRO">Cadastro</option><option value="ADMINISTRADOR">Administrador</option></select></label>
-      <label>Área da Gerência<select name="area_gerencia"><option value="">Não se aplica</option><option value="DIGITAL">Digital</option><option value="CONVENCIONAL">Convencional</option></select><span class="mini">Obrigatória quando o perfil for Gerência.</span></label>
+      <label>Área da Gerência<select name="area_gerencia"><option value="">Não se aplica</option><option value="DIGITAL">Digital</option></select><span class="mini">Obrigatória quando o perfil for Gerência.</span></label>
       <div class="full"><button>Criar acesso</button></div>
     </div></form></div>
     <div class="tabela-wrap"><table><thead><tr><th>Pessoa</th><th>Perfil</th><th>Área</th><th>Status</th><th>Ações</th></tr></thead><tbody>${linhas || `<tr><td colspan="5">Nenhum acesso.</td></tr>`}</tbody></table></div>
@@ -19099,7 +18944,7 @@ function paginaEditarAcessoV31(usuario, alvo, mensagem = "", tipo = "sucesso") {
       <label>Nome<input name="nome" required minlength="2" value="${escapeHtml(alvo.nome)}"></label>
       <label>Usuário<input name="usuario" required minlength="3" value="${escapeHtml(alvo.usuario)}"></label>
       <label>Perfil<select name="perfil" required><option value="ADMINISTRADOR" ${alvo.perfil === "ADMINISTRADOR" ? "selected" : ""}>Administrador</option><option value="COORDENADOR" ${alvo.perfil === "COORDENADOR" ? "selected" : ""}>Coordenador</option><option value="GERENCIA" ${alvo.perfil === "GERENCIA" ? "selected" : ""}>Gerência</option><option value="CADASTRO" ${alvo.perfil === "CADASTRO" ? "selected" : ""}>Cadastro</option></select></label>
-      <label>Área da Gerência<select name="area_gerencia"><option value="">Não se aplica</option><option value="DIGITAL" ${area === "DIGITAL" ? "selected" : ""}>Digital</option><option value="CONVENCIONAL" ${area === "CONVENCIONAL" ? "selected" : ""}>Convencional</option></select></label>
+      <label>Área da Gerência<select name="area_gerencia"><option value="">Não se aplica</option><option value="DIGITAL" ${area === "DIGITAL" ? "selected" : ""}>Digital</option></select></label>
       <label>Nova senha <span class="mini">opcional</span><input type="password" name="senha" minlength="6"></label>
       <div class="full"><button>Salvar alterações</button></div>
     </div></form></div>
@@ -19919,63 +19764,52 @@ async function sincronizarTrabalhoCidadeV31(env, trabalhoId) {
 }
 async function dadosMinhaProducaoV31(env, usuario, inicio, fim) {
   const saida = [];
-  for (const area of areasUsuarioV31(usuario)) {
-    for (const setor of setoresUsuarioV31(usuario, area)) {
-      let unidades = [];
-      if (area === "DIGITAL") unidades = (await unidadesConcluidas(env, inicio, fim, usuario.id)).filter((x) => x.setor === setor);
-      else unidades = (await producaoDetalhadaConvencionalV25(env, setor, inicio, fim)).filter((x) => Number(x.usuario_id) === Number(usuario.id));
-      const porDia = /* @__PURE__ */ new Map();
-      for (const unidade of unidades) {
-        if (!unidade.data) continue;
-        const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(unidade.data));
-        porDia.set(dia, Number(porDia.get(dia) || 0) + 1);
-      }
-      const dias = porDia.size;
-      const regras = await regrasBonificacaoV25(env, area, setor, inicio, fim);
-      const elegivel = usuarioParticipaBonusV31(usuario, area);
-      let regra = elegivel ? regraFuncionarioV25(regras, usuario.id, fim) || regraFuncionarioV25(regras, usuario.id) : null;
-      const ajusteMap = await ajustesDiasV25(env, area, setor, inicio, fim);
-      const ajuste = ajusteMap.get(Number(usuario.id));
-      const diasConsiderados = ajuste ? Number(ajuste.dias_considerados || 0) : dias;
-      const meiosPeriodos = ajuste ? Number(ajuste.meios_periodos_considerados || 0) : 0;
-      let metaDiaria = regra ? Number(regra.meta_diaria || 0) : null;
-      let metaMeioPeriodo = regra ? Math.ceil(metaDiaria / 2) : null;
-      let meta = regra ? metaDiaria * diasConsiderados + metaMeioPeriodo * meiosPeriodos : null;
-      let excedente = meta === null ? null : Math.max(0, unidades.length - meta);
-      let regraSegmentada = false;
-      let bonusSegmentado = null;
-      if (elegivel && !ajuste && porDia.size) {
-        const segmentos = /* @__PURE__ */ new Map();
-        for (const [dia, quantidadeDia] of porDia) {
-          const rDia = regraFuncionarioV25(regras, usuario.id, dia);
-          if (!rDia) continue;
-          const chave = `${rDia.id}:${rDia.origem}`;
-          if (!segmentos.has(chave)) segmentos.set(chave, { regra: rDia, dias: 0, producao: 0 });
-          const seg = segmentos.get(chave);
-          seg.dias += 1;
-          seg.producao += quantidadeDia;
-        }
-        if (segmentos.size) {
-          let metaSomada = 0, excedenteSomado = 0;
-          bonusSegmentado = 0;
-          for (const seg of segmentos.values()) {
-            const md = Number(seg.regra.meta_diaria || 0);
-            const mp = md * seg.dias;
-            metaSomada += mp;
-            excedenteSomado += Math.max(0, seg.producao - mp);
-            bonusSegmentado += Math.max(0, seg.producao - mp) * Number(seg.regra.valor_excedente_centavos || 0);
-          }
-          const regs = [...segmentos.values()].map((x) => x.regra);
-          regraSegmentada = regs.length > 1;
-          regra = regs.length === 1 ? regs[0] : { origem: "SEGMENTADA", segmentos: regs.length };
-          metaDiaria = regs.length === 1 ? Number(regs[0].meta_diaria || 0) : null;
-          metaMeioPeriodo = metaDiaria === null ? null : Math.ceil(metaDiaria / 2);
-          meta = metaSomada;
-          excedente = excedenteSomado;
-        }
-      }
-      saida.push({ area, setor, quantidade: unidades.length, dias, dias_considerados: diasConsiderados, meios_periodos_considerados: meiosPeriodos, meta_diaria: metaDiaria, meta_meio_periodo: metaMeioPeriodo, meta, excedente, regra_segmentada: regraSegmentada, bonus_centavos: !elegivel || meta === null ? null : bonusSegmentado !== null ? bonusSegmentado : Number(excedente || 0) * Number(regra?.valor_excedente_centavos || 0) });
+  const diasUteis = diasUteisMetaV60(inicio, fim);
+  const atribuidos = setoresUsuarioV31(usuario, "DIGITAL");
+  const todasUnidades = (await unidadesConcluidas(env, inicio, fim, usuario.id)).filter((x) => Number(x.usuario_id) === Number(usuario.id));
+  for (const setor of atribuidos) {
+    const unidades = todasUnidades.filter((x) => String(x.setor) === String(setor));
+    const porDia = new Map();
+    for (const unidade of unidades) {
+      if (!unidade.data) continue;
+      const dia = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(unidade.data));
+      porDia.set(dia, Number(porDia.get(dia) || 0) + 1);
     }
+    const regras = await regrasBonificacaoV25(env, "DIGITAL", setor, inicio, fim);
+    const elegivel = usuarioParticipaBonusV31(usuario, "DIGITAL");
+    const segmentos = new Map();
+    if (elegivel) {
+      const datas = [...new Set([...diasUteis, ...porDia.keys()])].sort();
+      for (const dia of datas) {
+        const regra = regraFuncionarioV25(regras, usuario.id, dia);
+        if (!regra) continue;
+        const chave = `${regra.id}:${regra.origem}`;
+        if (!segmentos.has(chave)) segmentos.set(chave, { regra, dias: 0, producao: 0 });
+        const segmento = segmentos.get(chave);
+        if (diasUteis.includes(dia)) segmento.dias++;
+        segmento.producao += Number(porDia.get(dia) || 0);
+      }
+    }
+    let regra = elegivel ? regraFuncionarioV25(regras, usuario.id, fim) || regraFuncionarioV25(regras, usuario.id) : null;
+    let meta = regra ? Number(regra.meta_diaria || 0) * diasUteis.filter((dia) => Boolean(regraFuncionarioV25(regras, usuario.id, dia))).length : null;
+    let excedente = meta === null ? null : Math.max(0, unidades.length - meta);
+    let bonusCentavos = meta === null ? null : excedente * Number(regra?.valor_excedente_centavos || 0);
+    let regraSegmentada = false;
+    if (segmentos.size) {
+      const valores = [...segmentos.values()];
+      const regs = valores.map((x) => x.regra);
+      meta = valores.reduce((soma, x) => soma + Number(x.regra.meta_diaria || 0) * x.dias, 0);
+      excedente = valores.reduce((soma, x) => soma + Math.max(0, x.producao - Number(x.regra.meta_diaria || 0) * x.dias), 0);
+      bonusCentavos = valores.reduce((soma, x) => soma + Math.max(0, x.producao - Number(x.regra.meta_diaria || 0) * x.dias) * Number(x.regra.valor_excedente_centavos || 0), 0);
+      regraSegmentada = regs.length > 1;
+      regra = regs.length === 1 ? regs[0] : { origem: "SEGMENTADA", segmentos: regs.length };
+    }
+    const regrasAtivas = diasUteis.map((dia) => regraFuncionarioV25(regras, usuario.id, dia)).filter(Boolean);
+    const metasDiarias = [...new Set(regrasAtivas.map((x) => Number(x.meta_diaria || 0)))];
+    saida.push({ area: "DIGITAL", setor, quantidade: unidades.length, dias: porDia.size, dias_considerados: diasUteis.length,
+      dias_uteis_periodo: diasUteis.length, meta_diaria: metasDiarias.length === 1 ? metasDiarias[0] : null,
+      meta_meio_periodo: null, meta, excedente, regra_segmentada: regraSegmentada,
+      bonus_centavos: !elegivel || meta === null ? null : bonusCentavos });
   }
   return saida;
 }
@@ -21027,14 +20861,14 @@ function paginaMateriaisV317(usuario, resinas, municipios, potes, resumo, mes, m
   `, "Materiais", usuario);
 }
 function paginaMinhaProducaoUnificadaV311(usuario, dados, itens, inicio, fim) {
-  const cards = dados.map((d) => `<div class="card"><span class="badge neutro">${escapeHtml(nomeAreaProducao(d.area))}</span><h3>${escapeHtml(nomeSetorAreaV31(d.area, d.setor))}</h3><strong style="font-size:28px">${d.quantidade}</strong><div class="mini">operações concluídas</div>${d.meta ? `<div class="barra-meta-v38" title="${Math.round(d.quantidade / d.meta * 100)}% da meta"><span style="width:${Math.min(100, Math.round(d.quantidade / d.meta * 100))}%"></span></div><div class="mini">${Math.round(d.quantidade / d.meta * 100)}% da meta do período${d.quantidade >= d.meta ? " · 🎯 meta batida!" : ` · faltam ${d.meta - d.quantidade}`}</div>` : ""}${d.bonus_centavos !== null && d.bonus_centavos !== void 0 ? `<div style="margin-top:6px">💰 Bônus estimado: <strong>${formatarMoedaCentavosV25(d.bonus_centavos)}</strong></div>` : ""}<hr style="border:0;border-top:1px solid #2b3338;margin:12px 0"><div>Jornada considerada: <strong>${d.dias_considerados} dia(s)${Number(d.meios_periodos_considerados || 0) ? ` + ${Number(d.meios_periodos_considerados)} meio(s) período(s)` : ""}</strong></div>${d.meta === null ? `<div class="mini">Sem meta configurada no período.</div>` : d.regra_segmentada ? `<div class="mini">Meta alterada durante o período · cálculo segmentado por vigência</div><div>Meta do período: <strong>${d.meta}</strong></div><div>Excedente: <strong>${d.excedente}</strong></div>` : `<div class="mini">Meta diária ${d.meta_diaria} · meio período ${d.meta_meio_periodo}</div><div>Meta do período: <strong>${d.meta}</strong></div><div>Excedente: <strong>${d.excedente}</strong></div>`}</div>`).join("");
+  const cards = dados.map((d) => `<div class="card"><span class="badge neutro">${escapeHtml(nomeAreaProducao(d.area))}</span><h3>${escapeHtml(nomeSetorAreaV31(d.area, d.setor))}</h3><strong style="font-size:28px">${d.quantidade}</strong><div class="mini">operações concluídas</div>${d.meta ? `<div class="barra-meta-v38" title="${Math.round(d.quantidade / d.meta * 100)}% da meta"><span style="width:${Math.min(100, Math.round(d.quantidade / d.meta * 100))}%"></span></div><div class="mini">${Math.round(d.quantidade / d.meta * 100)}% da meta do período${d.quantidade >= d.meta ? " · 🎯 meta batida!" : ` · faltam ${d.meta - d.quantidade}`}</div>` : ""}${d.bonus_centavos !== null && d.bonus_centavos !== void 0 ? `<div style="margin-top:6px">💰 Bônus estimado: <strong>${formatarMoedaCentavosV25(d.bonus_centavos)}</strong></div>` : ""}<hr style="border:0;border-top:1px solid #2b3338;margin:12px 0"><div>Dias úteis no período: <strong>${d.dias_uteis_periodo || d.dias_considerados}</strong><div class="mini">Meta diária × dias de segunda a sexta. Produção de fim de semana entra no total, sem elevar a meta.</div></div>${d.meta === null ? `<div class="mini">Sem meta configurada no período.</div>` : d.regra_segmentada ? `<div class="mini">Meta alterada durante o período · cálculo segmentado por vigência</div><div>Meta do período: <strong>${d.meta}</strong></div><div>Excedente: <strong>${d.excedente}</strong></div>` : `<div class="mini">Meta diária ${d.meta_diaria} · dias úteis ${d.dias_uteis_periodo || d.dias_considerados}</div><div>Meta do período: <strong>${d.meta}</strong></div><div>Excedente: <strong>${d.excedente}</strong></div>`}</div>`).join("");
   const porSetor = {};
   for (const i of itens) porSetor[i.setor] = (porSetor[i.setor] || 0) + 1;
   const resumoSetor = Object.entries(porSetor).map(([s, q]) => `<div class="metrica"><span class="mini">${escapeHtml(nomeSetorAreaV31("DIGITAL", s))}</span><strong style="font-size:24px;display:block">${q}</strong></div>`).join("");
   const linhas = itens.slice(0, 300).map((i) => `<tr><td>${escapeHtml(formatarData(i.data))}</td><td>${escapeHtml(nomeSetorAreaV31("DIGITAL", i.setor || "") || "—")}</td><td>${escapeHtml(i.paciente || "—")}</td><td>${escapeHtml(i.municipio || "—")}</td><td>${escapeHtml(i.codigo || "—")}</td><td>${escapeHtml([i.arcada, i.tipo_protese].filter(Boolean).join(" · ") || "—")}</td></tr>`).join("");
   return layout(`
     <div class="cabecalho-pagina">
-      <div><h2>Minha produção</h2><p class="nota">Produção, metas, bônus estimado e o histórico completo do período, na mesma tela. Cada Área + Setor é calculado separadamente.</p></div>
+      <div><h2>Minha produção</h2><p class="nota">Produção, metas, bônus estimado e o histórico completo do período, na mesma tela. A meta considera segunda a sexta; a produção em fim de semana também conta no total produzido.</p></div>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><a class="botao botao-sec" href="/meu-perfil">👤 Meu perfil</a><a class="botao botao-sec" href="/minhas-notas">📝 Minhas anotações</a></div>
     </div>
     <div class="card" style="margin-bottom:14px"><form method="GET"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:end"><label>Início<input type="date" name="inicio" value="${escapeHtml(inicio)}"></label><label>Fim<input type="date" name="fim" value="${escapeHtml(fim)}"></label><button>Aplicar</button></div></form></div>
@@ -21052,11 +20886,10 @@ function paginaAdministracaoV31(usuario) {
       <a class="card" href="/funcionarios" style="text-decoration:none;color:inherit"><h3>Equipe</h3><p class="nota">Funcionários, áreas e múltiplos setores.</p></a>
       ${isAdmin(usuario) ? `<a class="card" href="/acessos" style="text-decoration:none;color:inherit"><h3>Usuários e acessos</h3><p class="nota">Administrador, Coordenador e Gerência por área.</p></a>` : ""}
       <a class="card" href="/producao-equipe" style="text-decoration:none;color:inherit"><h3>Metas e bonificação</h3><p class="nota">Regras por Área + Setor.</p></a>
-      <a class="card" href="/fechamentos" style="text-decoration:none;color:inherit"><h3>Fechamentos</h3><p class="nota">Digital e Convencional fechados separadamente.</p></a>
+      <a class="card" href="/fechamentos" style="text-decoration:none;color:inherit"><h3>Fechamentos</h3><p class="nota">Fechamentos da produção Digital.</p></a>
       <a class="card" href="/universidade/admin" style="text-decoration:none;color:inherit"><h3>Universidade Fluxo Lab</h3><p class="nota">Cadastrar cursos, aulas, vídeos e avaliações; acompanhar a estrutura de aprendizagem.</p></a>
       <a class="card" href="/integridade" style="text-decoration:none;color:inherit"><h3>Integridade</h3><p class="nota">Diagnóstico somente leitura.</p></a>
       <a class="card" href="/administracao/auditoria" style="text-decoration:none;color:inherit"><h3>Auditoria V3.4.4</h3><p class="nota">Alterações críticas e quem as realizou.</p></a>
-      <div class="card"><h3>Reparo Convencional</h3><p class="nota">Compatibilidade das etapas antigas. Só executa quando você solicitar; navegar no Convencional nunca mais dispara reparos.</p><form method="POST" action="/administracao/reparar-convencional" onsubmit="return confirm('Executar a rotina de compatibilidade das etapas do Convencional? Use apenas quando necessário.');"><button class="botao-sec">Executar reparo controlado</button></form></div>
     </div>
   `, "Administração", usuario);
 }
@@ -21065,7 +20898,7 @@ function paginaAuditoriaSistemaV31(usuario, itens) {
   return layout(`<div class="cabecalho-pagina"><div><h2>Auditoria V3.4.4</h2><p class="nota">Registro administrativo. Histórico operacional antigo continua preservado nas auditorias específicas.</p></div><a class="botao botao-sec" href="/administracao">← Administração</a></div><div class="tabela-wrap"><table><thead><tr><th>Data</th><th>Área</th><th>Usuário</th><th>Ação</th><th>Registro</th><th>Campo</th><th>Alteração</th></tr></thead><tbody>${linhas || `<tr><td colspan="7">Sem registros.</td></tr>`}</tbody></table></div>`, "Auditoria", usuario);
 }
 async function dadosRelatorioAreaV31(env, area, inicio, fim) {
-  const setores = setoresAreaBonificacaoV25(area);
+  const setores = area === "DIGITAL" ? SETORES : [];
   const paineis = await Promise.all(setores.map((setor) => obterPainelProducaoEquipeV25(env, area, setor, inicio, fim)));
   const setoresDados = setores.map((setor, indice) => {
     const painel = paineis[indice];
@@ -21141,7 +20974,7 @@ async function dadosResumoGeralV31(env, inicio, fim) {
   return { inicio, fim, digital, convencional };
 }
 function filtrosRelatorioV31(area, inicio, fim, podeGeral) {
-  return `<div class="card" style="margin-bottom:14px"><form method="GET" action="/relatorios"><div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap"><label>Área<select name="area"><option value="DIGITAL" ${area === "DIGITAL" ? "selected" : ""}>Digital</option><option value="CONVENCIONAL" ${area === "CONVENCIONAL" ? "selected" : ""}>Convencional</option>${podeGeral ? `<option value="GERAL" ${area === "GERAL" ? "selected" : ""}>Resumo geral</option>` : ""}</select></label><label>Início<input type="date" name="inicio" value="${escapeHtml(inicio)}"></label><label>Fim<input type="date" name="fim" value="${escapeHtml(fim)}"></label><button>Aplicar</button></div></form></div>`;
+  return `<div class="card" style="margin-bottom:14px"><form method="GET" action="/relatorios"><div style="display:flex;gap:8px;align-items:end;flex-wrap:wrap"><label>Área<select name="area"><option value="DIGITAL" ${area === "DIGITAL" ? "selected" : ""}>Digital</option></select></label><label>Início<input type="date" name="inicio" value="${escapeHtml(inicio)}"></label><label>Fim<input type="date" name="fim" value="${escapeHtml(fim)}"></label><button>Aplicar</button></div></form></div>`;
 }
 function tabelaPessoasRelatorioV31(usuario, dados) {
   const podeBonus = isCoord(usuario);
@@ -21168,7 +21001,7 @@ function paginaRelatorioAreaV31(usuario, dados, mensagem = "", tipo = "sucesso")
 }
 function paginaResumoGeralV31(usuario, dados) {
   const card = (nome, d) => `<div class="card"><h2 style="margin-top:0">${nome}</h2><div style="display:grid;grid-template-columns:repeat(2,1fr);gap:12px"><div><span class="mini">Operações</span><strong style="display:block;font-size:27px">${d.total_operacoes}</strong></div><div><span class="mini">Concluídas/aprovadas</span><strong style="display:block;font-size:27px">${d.unidades_concluidas}</strong></div><div><span class="mini">Retrabalhos</span><strong style="display:block;font-size:27px">${d.total_retrabalhos}</strong></div><div><span class="mini">Entregas</span><strong style="display:block;font-size:27px">${d.entregas}</strong></div></div><a class="botao botao-sec" style="margin-top:14px" href="/relatorios?area=${nome.toUpperCase()}&inicio=${dados.inicio}&fim=${dados.fim}">Abrir relatório ${nome}</a></div>`;
-  return layout(`<div class="cabecalho-pagina"><div><h2>Resumo Geral</h2><p class="nota">Visão executiva. Os números permanecem separados e nunca são somados para meta.</p></div></div>${filtrosRelatorioV31("GERAL", dados.inicio, dados.fim, true)}<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px">${card("Digital", dados.digital)}${card("Convencional", dados.convencional)}</div>`, `Resumo Geral`, usuario);
+  return layout(`<div class="cabecalho-pagina"><div><h2>Resumo Geral</h2><p class="nota">Visão executiva. Os números permanecem separados e nunca são somados para meta.</p></div></div>${filtrosRelatorioV31("DIGITAL", dados.inicio, dados.fim, false)}<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(310px,1fr));gap:14px">${card("Digital", dados.digital)}</div>`, `Resumo Geral`, usuario);
 }
 function csvEscapeV31(valor) {
   const s = String(valor ?? "");
@@ -21208,20 +21041,15 @@ function paginaImpressaoRelatorioAreaV31(usuario, dados) {
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>Relatório ${escapeHtml(nomeAreaProducao(dados.area))}</title><style>body{font-family:Arial,sans-serif;color:#111;margin:28px}table{width:100%;border-collapse:collapse;margin:12px 0 24px}th,td{border:1px solid #bbb;padding:7px;text-align:left}th{background:#eee}.cards{display:flex;gap:10px;flex-wrap:wrap}.card{border:1px solid #bbb;padding:12px;min-width:140px}.no-print{margin-bottom:16px}@media print{.no-print{display:none}body{margin:0}}</style></head><body><div class="no-print"><button onclick="window.print()">Imprimir / Salvar PDF</button></div><h1>Fluxo Lab · ${escapeHtml(nomeAreaProducao(dados.area))}</h1><p>${escapeHtml(formatarDataCurta(dados.inicio))} a ${escapeHtml(formatarDataCurta(dados.fim))}</p><div class="cards"><div class="card">Operações<br><b>${dados.total_operacoes}</b></div><div class="card">Concluídas/aprovadas<br><b>${dados.unidades_concluidas}</b></div><div class="card">Retrabalhos<br><b>${dados.total_retrabalhos}</b></div><div class="card">Entregas<br><b>${dados.entregas}</b></div></div><h2>Setores</h2><table><thead><tr><th>Setor</th><th>Operações</th><th>PT</th><th>PPR</th><th>Sem classificação</th><th>Retrabalhos</th></tr></thead><tbody>${setores}</tbody></table><h2>Pessoas</h2><table><thead><tr><th>Pessoa</th><th>Perfil</th><th>Setor</th><th>Produção</th><th>Dias</th>${podeBonus ? "<th>Bônus</th>" : ""}</tr></thead><tbody>${pessoas.join("")}</tbody></table></body></html>`;
 }
 async function listarFechamentosAreaV31(env, area = "") {
-  const filtro = ["DIGITAL", "CONVENCIONAL"].includes(area) ? area : "";
+  const filtro = "DIGITAL";
   const r = await env.db.prepare(`SELECT f.*,u.nome AS fechado_por_nome,ur.nome AS reaberto_por_nome FROM fechamentos_mensais_area f LEFT JOIN usuarios u ON u.id=f.fechado_por LEFT JOIN usuarios ur ON ur.id=f.reaberto_por WHERE (?='' OR f.area=?) ORDER BY f.ano DESC,f.mes DESC,CASE f.area WHEN 'DIGITAL' THEN 1 ELSE 2 END`).bind(filtro, filtro).all();
   return r.results || [];
 }
 async function listarFechamentosLegadoV31(env) {
-  try {
-    const r = await env.db.prepare(`SELECT id,ano,mes,status,fechado_em FROM fechamentos_mensais ORDER BY ano DESC,mes DESC LIMIT 24`).all();
-    return r.results || [];
-  } catch {
-    return [];
-  }
+  return [];
 }
 async function salvarFechamentoAreaV31(env, usuario, ano, mes, area, observacao = "") {
-  if (!["DIGITAL", "CONVENCIONAL"].includes(area)) throw new Error("Área inválida.");
+  if (area !== "DIGITAL") throw new Error("Somente fechamentos Digital estão ativos.");
   const periodoMes = periodoMesV27(ano, mes);
   if (!periodoMes) throw new Error("Ano ou mês inválido.");
   const existente = await env.db.prepare(`SELECT * FROM fechamentos_mensais_area WHERE ano=? AND mes=? AND area=? LIMIT 1`).bind(ano, mes, area).first();
@@ -21321,8 +21149,8 @@ async function obterFechamentoAreaV31(env, id) {
 function paginaFechamentosV31(usuario, fechamentos, legado = [], mensagem = "", tipo = "sucesso") {
   const podeFechar = isCoord(usuario);
   const linhas = fechamentos.map((f) => `<tr><td>${escapeHtml(nomeMesV27(f.mes))}/${f.ano}</td><td><span class="badge neutro">${escapeHtml(nomeAreaProducao(f.area))}</span></td><td><span class="badge ${classeStatusV31(f.status)}">${escapeHtml(f.status)}</span></td><td>${Number(f.total_operacoes || 0)}</td><td>${Number(f.total_entregas || 0)}</td>${podeFechar ? `<td>${escapeHtml(formatarMoedaCentavosV25(f.bonus_total_centavos || 0))}</td>` : ""}<td><a class="botao botao-sec" href="/fechamentos/${f.id}">Abrir</a></td></tr>`).join("");
-  const leg = legado.map((f) => `<tr><td>${escapeHtml(nomeMesV27(f.mes))}/${f.ano}</td><td>V3.0 legado</td><td>${escapeHtml(f.status)}</td><td><a class="botao botao-sec" href="/fechamentos-legado/${f.id}">Histórico legado</a></td></tr>`).join("");
-  return layout(`<div class="cabecalho-pagina"><div><h2>Fechamentos mensais</h2><p class="nota">Digital e Convencional fecham separadamente. O passado da V3.0 permanece preservado.</p></div><a class="botao botao-sec" href="/administracao">← Administração</a></div>${mensagem ? `<div class="${tipo}">${escapeHtml(mensagem)}</div>` : ""}${podeFechar ? `<div class="card" style="margin-bottom:16px"><h3 style="margin-top:0">Fechar área do mês</h3><form method="POST" action="/fechamentos/fechar"><div class="form-grid"><label>Ano<input type="number" name="ano" min="2020" max="2100" value="${(/* @__PURE__ */ new Date()).getUTCFullYear()}" required></label><label>Mês<select name="mes">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === (/* @__PURE__ */ new Date()).getUTCMonth() + 1 ? "selected" : ""}>${escapeHtml(nomeMesV27(i + 1))}</option>`).join("")}</select></label><label>Área<select name="area"><option value="DIGITAL">Digital</option><option value="CONVENCIONAL">Convencional</option></select></label><label>Observação<input name="observacao" maxlength="500"></label><div class="full"><button>Fechar área</button></div></div></form></div>` : ""}<div class="tabela-wrap"><table><thead><tr><th>Mês</th><th>Área</th><th>Status</th><th>Operações</th><th>Entregas</th>${podeFechar ? "<th>Bônus</th>" : ""}<th>Ação</th></tr></thead><tbody>${linhas || `<tr><td colspan="7">Nenhum fechamento por área.</td></tr>`}</tbody></table></div>${legado.length ? `<h2 style="margin-top:24px">Fechamentos legados V3.0</h2><div class="tabela-wrap"><table><thead><tr><th>Mês</th><th>Tipo</th><th>Status</th><th>Ação</th></tr></thead><tbody>${leg}</tbody></table></div>` : ""}`, "Fechamentos", usuario);
+  const leg = "";
+  return layout(`<div class="cabecalho-pagina"><div><h2>Fechamentos mensais</h2><p class="nota">Fechamentos mensais da produção Digital.</p></div><a class="botao botao-sec" href="/administracao">← Administração</a></div>${mensagem ? `<div class="${tipo}">${escapeHtml(mensagem)}</div>` : ""}${podeFechar ? `<div class="card" style="margin-bottom:16px"><h3 style="margin-top:0">Fechar área do mês</h3><form method="POST" action="/fechamentos/fechar"><div class="form-grid"><label>Ano<input type="number" name="ano" min="2020" max="2100" value="${(/* @__PURE__ */ new Date()).getUTCFullYear()}" required></label><label>Mês<select name="mes">${Array.from({ length: 12 }, (_, i) => `<option value="${i + 1}" ${i + 1 === (/* @__PURE__ */ new Date()).getUTCMonth() + 1 ? "selected" : ""}>${escapeHtml(nomeMesV27(i + 1))}</option>`).join("")}</select></label><label>Área<select name="area"><option value="DIGITAL">Digital</option></select></label><label>Observação<input name="observacao" maxlength="500"></label><div class="full"><button>Fechar área</button></div></div></form></div>` : ""}<div class="tabela-wrap"><table><thead><tr><th>Mês</th><th>Área</th><th>Status</th><th>Operações</th><th>Entregas</th>${podeFechar ? "<th>Bônus</th>" : ""}<th>Ação</th></tr></thead><tbody>${linhas || `<tr><td colspan="7">Nenhum fechamento por área.</td></tr>`}</tbody></table></div>`, "Fechamentos", usuario);
 }
 function paginaFechamentoDetalheV31(usuario, dados, mensagem = "", tipo = "sucesso") {
   const f = dados.fechamento, podeBonus = isCoord(usuario);
@@ -23162,7 +22990,7 @@ async function rankingProducaoV318(env, inicio, fim, areaFiltro = "", setorFiltr
     const digital = await unidadesConcluidas(env, inicio, fim);
     for (const x of digital) unidades.push({ ...x, area: "DIGITAL", setor: String(x.setor || "").toUpperCase(), dia: diaDataPopupV318(x.data) });
   }
-  const cacheRegras = /* @__PURE__ */ new Map(), cacheMetasPessoais = /* @__PURE__ */ new Map(), cacheAjustes = /* @__PURE__ */ new Map();
+  const cacheRegras = /* @__PURE__ */ new Map(), cacheMetasPessoais = /* @__PURE__ */ new Map();
   const obterRegras = async (area, setor) => {
     const key = area + ":" + setor;
     if (!cacheRegras.has(key)) cacheRegras.set(key, await regrasBonificacaoV25(env, area, setor, inicio, fim));
@@ -23172,11 +23000,6 @@ async function rankingProducaoV318(env, inicio, fim, areaFiltro = "", setorFiltr
     const key = area + ":" + setor;
     if (!cacheMetasPessoais.has(key)) cacheMetasPessoais.set(key, await regrasMetasPessoaisV318(env, area, setor, inicio, fim));
     return cacheMetasPessoais.get(key);
-  };
-  const obterAjustes = async (area, setor) => {
-    const key = area + ":" + setor;
-    if (!cacheAjustes.has(key)) cacheAjustes.set(key, await ajustesDiasV25(env, area, setor, inicio, fim));
-    return cacheAjustes.get(key);
   };
   const linhas = [];
   const diaUnico = inicio === fim;
@@ -23195,7 +23018,7 @@ async function rankingProducaoV318(env, inicio, fim, areaFiltro = "", setorFiltr
     let producaoTotal = 0, metaTotal = 0, temMeta = false;
     const labels = [];
     for (const atrib of atribuicoes) {
-      const dados = unidades.filter((x) => Number(x.usuario_id) === Number(u.id) && x.area === atrib.area && x.setor === atrib.setor && (!somenteDiasUteis || diasUteisRankingV318(String(x.dia || "").slice(0, 10), String(x.dia || "").slice(0, 10)).length > 0));
+      const dados = unidades.filter((x) => Number(x.usuario_id) === Number(u.id) && x.area === atrib.area && x.setor === atrib.setor);
       const regras = await obterRegras(atrib.area, atrib.setor);
       const pessoais = await obterMetasPessoais(atrib.area, atrib.setor);
       const metaNoDia = (dia) => {
@@ -23203,39 +23026,12 @@ async function rankingProducaoV318(env, inicio, fim, areaFiltro = "", setorFiltr
         if (pessoal) return Number(pessoal.meta || 0);
         return Number(regraFuncionarioV25(regras, u.id, dia)?.meta_diaria || 0);
       };
-      const metaDiariaFim = metaNoDia(fim);
-      if (diaUnico) {
-        if (metaDiariaFim > 0) {
-          producaoTotal += dados.length;
-          metaTotal += metaDiariaFim;
-          temMeta = true;
-        }
-      } else {
-        const ajustes = await obterAjustes(atrib.area, atrib.setor);
-        const ajuste = ajustes.get(Number(u.id));
-        const periodoMeta = periodoMetaMensalV312(inicio, fim);
-        if (ajuste && metaDiariaFim > 0 && inicio === periodoMeta.inicio && fim === periodoMeta.fim) {
-          const dias = Math.max(0, Number(ajuste.dias_considerados || 0));
-          const meios = Math.max(0, Number(ajuste.meios_periodos_considerados || 0));
-          producaoTotal += dados.length;
-          metaTotal += metaDiariaFim * dias + Math.ceil(metaDiariaFim / 2) * meios;
-          temMeta = true;
-        } else {
-          const porDia = /* @__PURE__ */ new Map();
-          for (const item of dados) {
-            if (!item.dia) continue;
-            porDia.set(item.dia, Number(porDia.get(item.dia) || 0) + 1);
-          }
-          const datasApuracao = new Set(diasUteisRankingV318(inicio, fim));
-          for (const dia of porDia.keys()) datasApuracao.add(dia);
-          for (const dia of [...datasApuracao].sort()) {
-            const md = metaNoDia(dia);
-            if (md <= 0) continue;
-            producaoTotal += Number(porDia.get(dia) || 0);
-            metaTotal += md;
-            temMeta = true;
-          }
-        }
+      const diasAlvo = diasUteisRankingV318(inicio, fim);
+      const metasAplicadas = diasAlvo.reduce((soma, dia) => soma + Math.max(0, metaNoDia(dia)), 0);
+      if (metasAplicadas > 0) {
+        producaoTotal += dados.length;
+        metaTotal += metasAplicadas;
+        temMeta = true;
       }
       labels.push(`${nomeAreaProducao(atrib.area)} · ${atrib.setor}`);
     }
@@ -23351,7 +23147,7 @@ function paginaLiderancaV318(usuario, dados, areaFiltro, setorFiltro) {
     </form>`;
   return layout(`
     <div class="cabecalho-pagina"><div><h2>🏆 Liderança da produção</h2><p class="nota">Classificação proporcional ao cumprimento das metas individuais. As quantidades de produção e os valores das metas não são exibidos.</p></div></div>
-    <section class="card" style="margin-bottom:14px">${filtros}<p class="mini" style="margin-top:10px">Período: ${escapeHtml(formatarDataCurta(dados.inicio))} a ${escapeHtml(formatarDataCurta(dados.fim))}. No dia selecionado, todos com meta ativa participam desde 0%. Em períodos maiores, entram todos os dias úteis (segunda a sexta), inclusive sem produção; fins de semana entram quando há conclusão registrada. Ajustes de jornada são respeitados no mês completo.</p></section>
+    <section class="card" style="margin-bottom:14px">${filtros}<p class="mini" style="margin-top:10px">Período: ${escapeHtml(formatarDataCurta(dados.inicio))} a ${escapeHtml(formatarDataCurta(dados.fim))}. No dia selecionado, todos com meta ativa participam desde 0%. A meta considera somente os dias úteis de segunda a sexta; a produção de sábado e domingo também entra no total produzido e não aumenta a meta.</p></section>
     ${cards || '<div class="card"><p class="nota">Nenhum colaborador com meta válida para o período selecionado.</p></div>'}
   `, "Liderança da produção", usuario);
 }
@@ -23532,11 +23328,11 @@ async function rotaPopupsV318(request, env, url, caminho) {
     }
     let area = String(url.searchParams.get("area") || "").toUpperCase();
     if (isGerencia(usuario)) {
-      const areasPermitidas = areasUsuarioV31(usuario).filter((a) => a === "DIGITAL" || a === "CONVENCIONAL" && MODO_CONVENCIONAL_ATIVO);
+      const areasPermitidas = areasUsuarioV31(usuario).filter((a) => a === "DIGITAL");
       if (!areasPermitidas.length) return textResponse("Sua conta de gerência ainda não possui uma área de produção ativa configurada.", 403);
       area = areasPermitidas.length === 1 ? areasPermitidas[0] : "";
     }
-    if (!["", "DIGITAL", "CONVENCIONAL"].includes(area) || area === "CONVENCIONAL" && !MODO_CONVENCIONAL_ATIVO) area = "";
+    if (!["", "DIGITAL"].includes(area)) area = "";
     let setor = String(url.searchParams.get("setor") || "").toUpperCase();
     const validos = area === "DIGITAL" ? SETORES : area === "" ? SETORES : [];
     if (!validos.includes(setor)) setor = "";
@@ -25267,14 +25063,7 @@ async function rotearV31Base(request, env, url, caminho) {
       throw erro;
     }
   }
-  if (metodo === "POST" && caminho === "/administracao/reparar-convencional") {
-    const usuario = await obterUsuarioLogado(request, env);
-    if (!usuario) return redirect("/");
-    if (!isCoord(usuario)) return textResponse("Acesso negado.", 403);
-    await garantirEtapasBasicasConvencionais(env);
-    await registrarAuditoriaSistemaV31(env, usuario.id, "CONVENCIONAL", "REPARO_ETAPAS_CONVENCIONAL", "SISTEMA", null, null, null, "EXECUTADO", "Rotina de compatibilidade executada manualmente.");
-    return redirect(`/administracao?ok=${encodeURIComponent("Reparo de etapas do Convencional executado.")}`);
-  }
+  if (metodo === "POST" && caminho === "/administracao/reparar-convencional") return textResponse("A rotina de reparo da área Convencional foi desativada.", 410);
   let matchImportacaoV330 = caminho.match(/^\/remessas\/(\d+)\/importar-folhas$/);
   if (matchImportacaoV330 && metodo === "GET") {
     const usuario = await obterUsuarioLogado(request, env);
@@ -26083,7 +25872,7 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!podeVerGestao(usuario)) return textResponse("Acesso negado.", 403);
     let area = String(url.searchParams.get("area") || "DIGITAL").toUpperCase();
     if (isGerencia(usuario)) area = areaGerenciaV31(usuario) || "";
-    if (!["DIGITAL", "CONVENCIONAL"].includes(area) || !podeGerenciarAreaV31(usuario, area)) return textResponse("Área não disponível para esta conta.", 403);
+    if (area !== "DIGITAL" || !podeGerenciarAreaV31(usuario, area)) return textResponse("Área não disponível para esta conta.", 403);
     return htmlResponse(paginaEquipeAreaV31(usuario, area, await listarEquipeAreaV31(env, area)));
   }
   if (metodo === "GET" && caminho.startsWith("/avatar-usuario/")) {
@@ -26295,7 +26084,7 @@ async function rotearV31Base(request, env, url, caminho) {
     const usuario = await obterUsuarioLogado(request, env);
     if (!usuario) return redirect("/");
     if (!isCoord(usuario)) return textResponse("Acesso negado.", 403);
-    const area = ["DIGITAL", "CONVENCIONAL"].includes(String(url.searchParams.get("area") || "").toUpperCase()) ? String(url.searchParams.get("area")).toUpperCase() : "";
+    const area = String(url.searchParams.get("area") || "").toUpperCase() === "DIGITAL" ? "DIGITAL" : "";
     return htmlResponse(paginaFuncionariosV31(usuario, await listarFuncionariosV31(env, area), url.searchParams.get("ok") || url.searchParams.get("erro") || "", url.searchParams.get("erro") ? "erro" : "sucesso", area));
   }
   if (caminho === "/funcionarios" && metodo === "POST") {
@@ -26307,15 +26096,15 @@ async function rotearV31Base(request, env, url, caminho) {
     const login = String(form.get("usuario") || "").trim().toLowerCase();
     const senha = String(form.get("senha") || "");
     const digitais = normalizarSetoresSelecionadosV31(form.getAll("setores_digitais"), SETORES);
-    const convencionais = normalizarSetoresSelecionadosV31(form.getAll("setores_convencionais"), SETORES_CONVENCIONAIS);
-    if (nome.length < 2 || login.length < 3 || senha.length < 6 || !digitais.length && !convencionais.length) return redirect(`/funcionarios?erro=${encodeURIComponent("Informe os dados e selecione pelo menos um setor.")}`);
+    const convencionais = [];
+    if (nome.length < 2 || login.length < 3 || senha.length < 6 || !digitais.length) return redirect(`/funcionarios?erro=${encodeURIComponent("Informe os dados e selecione pelo menos um setor.")}`);
     const duplicado = await env.db.prepare(`SELECT id FROM usuarios WHERE lower(usuario)=? LIMIT 1`).bind(login).first();
     if (duplicado) return redirect(`/funcionarios?erro=${encodeURIComponent("Esse usuário já existe.")}`);
-    const areaLegada = areaLegadaV31(digitais, convencionais);
+    const areaLegada = "DIGITAL";
     const r = await env.db.prepare(`INSERT INTO usuarios (nome,usuario,senha_hash,setor,area_producao,setor_convencional,perfil,ativo,excluido) VALUES (?,?,?,?,?,?,'FUNCIONARIO',1,0)`).bind(nome, login, await criarHashSenha(senha), digitais[0] || null, areaLegada, convencionais[0] || null).run();
     const id = Number(r.meta.last_row_id);
     await sincronizarPermissoesFuncionarioV31(env, id, digitais, convencionais, usuario.id);
-    await registrarAuditoriaSistemaV31(env, usuario.id, "GERAL", "CRIAR_FUNCIONARIO", "USUARIO", id, "permissoes", null, JSON.stringify({ DIGITAL: digitais, CONVENCIONAL: convencionais }), null);
+    await registrarAuditoriaSistemaV31(env, usuario.id, "GERAL", "CRIAR_FUNCIONARIO", "USUARIO", id, "permissoes", null, JSON.stringify({ DIGITAL: digitais }), null);
     return redirect(`/funcionarios?ok=${encodeURIComponent("Funcionário cadastrado com múltiplos setores.")}`);
   }
   if (caminho === "/funcionarios/toggle" && metodo === "POST") {
@@ -26367,14 +26156,14 @@ async function rotearV31Base(request, env, url, caminho) {
     const senha = String(form.get("senha") || "");
     const nivelAcesso = String(form.get("nivel_acesso") || "FUNCIONARIO").trim().toUpperCase();
     const digitais = normalizarSetoresSelecionadosV31(form.getAll("setores_digitais"), SETORES);
-    const convencionais = normalizarSetoresSelecionadosV31(form.getAll("setores_convencionais"), SETORES_CONVENCIONAIS);
-    const promoverGerencia = ["GERENCIA_DIGITAL", "GERENCIA_CONVENCIONAL"].includes(nivelAcesso);
+    const convencionais = [];
+    const promoverGerencia = nivelAcesso === "GERENCIA_DIGITAL";
     if (promoverGerencia && !isAdmin(usuario)) return textResponse("Somente o Administrador pode promover funcionário para Gerência.", 403);
-    if (nome.length < 2 || login.length < 3 || senha && senha.length < 6 || !promoverGerencia && !digitais.length && !convencionais.length) return textResponse("Dados inválidos.", 400);
+    if (nome.length < 2 || login.length < 3 || senha && senha.length < 6 || !promoverGerencia && !digitais.length) return textResponse("Dados inválidos.", 400);
     const dup = await env.db.prepare(`SELECT id FROM usuarios WHERE lower(usuario)=? AND id!=? LIMIT 1`).bind(login, id).first();
     if (dup) return textResponse("Usuário já existe.", 400);
     if (promoverGerencia) {
-      const areaGerencia = nivelAcesso === "GERENCIA_CONVENCIONAL" ? "CONVENCIONAL" : "DIGITAL";
+      const areaGerencia = "DIGITAL";
       if (senha) await env.db.prepare(`UPDATE usuarios SET nome=?,usuario=?,senha_hash=?,perfil='GERENCIA',setor=NULL,area_producao=?,setor_convencional=NULL WHERE id=?`).bind(nome, login, await criarHashSenha(senha), areaGerencia, id).run();
       else await env.db.prepare(`UPDATE usuarios SET nome=?,usuario=?,perfil='GERENCIA',setor=NULL,area_producao=?,setor_convencional=NULL WHERE id=?`).bind(nome, login, areaGerencia, id).run();
       await sincronizarAreaGerenciaV31(env, id, areaGerencia, usuario.id);
@@ -26382,11 +26171,11 @@ async function rotearV31Base(request, env, url, caminho) {
       await registrarAuditoriaSistemaV31(env, usuario.id, "GERAL", "PROMOVER_FUNCIONARIO_GERENCIA", "USUARIO", id, "perfil/area", "FUNCIONARIO", `GERENCIA:${areaGerencia}`, "Promoção realizada pela edição do funcionário. Trabalhos históricos e vínculos pelo usuario_id foram preservados.");
       return redirect(`/acessos?ok=${encodeURIComponent(`Funcionário promovido para Gerência ${areaGerencia === "DIGITAL" ? "Digital" : "Convencional"}.`)}`);
     }
-    const areaLegada = areaLegadaV31(digitais, convencionais);
+    const areaLegada = "DIGITAL";
     if (senha) await env.db.prepare(`UPDATE usuarios SET nome=?,usuario=?,senha_hash=?,setor=?,area_producao=?,setor_convencional=? WHERE id=?`).bind(nome, login, await criarHashSenha(senha), digitais[0] || null, areaLegada, convencionais[0] || null, id).run();
     else await env.db.prepare(`UPDATE usuarios SET nome=?,usuario=?,setor=?,area_producao=?,setor_convencional=? WHERE id=?`).bind(nome, login, digitais[0] || null, areaLegada, convencionais[0] || null, id).run();
-    const velho = JSON.stringify({ DIGITAL: setoresUsuarioV31(antes, "DIGITAL"), CONVENCIONAL: setoresUsuarioV31(antes, "CONVENCIONAL") });
-    const novo = JSON.stringify({ DIGITAL: digitais, CONVENCIONAL: convencionais });
+    const velho = JSON.stringify({ DIGITAL: setoresUsuarioV31(antes, "DIGITAL") });
+    const novo = JSON.stringify({ DIGITAL: digitais });
     await sincronizarPermissoesFuncionarioV31(env, id, digitais, convencionais, usuario.id);
     await registrarAuditoriaSistemaV31(env, usuario.id, "GERAL", "EDITAR_FUNCIONARIO", "USUARIO", id, "permissoes", velho, novo, null);
     return redirect(`/funcionarios?ok=${encodeURIComponent("Funcionário atualizado.")}`);
@@ -26403,9 +26192,9 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!isAdmin(usuario)) return textResponse("Acesso exclusivo do Administrador.", 403);
     const f = await request.formData();
     const nome = String(f.get("nome") || "").trim(), login = String(f.get("usuario") || "").trim().toLowerCase(), senha = String(f.get("senha") || ""), perfil = String(f.get("perfil") || "").toUpperCase(), area = String(f.get("area_gerencia") || "").toUpperCase();
-    if (nome.length < 2 || login.length < 3 || senha.length < 6 || !PERFIS_ACESSO.includes(perfil) || perfil === "GERENCIA" && !["DIGITAL", "CONVENCIONAL"].includes(area)) return redirect(`/acessos?erro=${encodeURIComponent("Confira perfil e área da Gerência.")}`);
+    if (nome.length < 2 || login.length < 3 || senha.length < 6 || !PERFIS_ACESSO.includes(perfil) || perfil === "GERENCIA" && area !== "DIGITAL") return redirect(`/acessos?erro=${encodeURIComponent("Confira perfil e área da Gerência.")}`);
     if (await env.db.prepare(`SELECT id FROM usuarios WHERE lower(usuario)=? LIMIT 1`).bind(login).first()) return redirect(`/acessos?erro=${encodeURIComponent("Usuário já existe.")}`);
-    const areaLegado = perfil === "GERENCIA" ? area : "AMBOS";
+    const areaLegado = "DIGITAL";
     const r = await env.db.prepare(`INSERT INTO usuarios (nome,usuario,senha_hash,setor,area_producao,setor_convencional,perfil,ativo,excluido) VALUES (?,?,?,NULL,?,NULL,?,1,0)`).bind(nome, login, await criarHashSenha(senha), areaLegado, perfil).run();
     const id = Number(r.meta.last_row_id);
     if (perfil === "GERENCIA") await sincronizarAreaGerenciaV31(env, id, area, usuario.id);
@@ -26429,10 +26218,10 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!antes || !PERFIS_ACESSO.includes(antes.perfil)) return redirect("/acessos");
     const f = await request.formData();
     const nome = String(f.get("nome") || "").trim(), login = String(f.get("usuario") || "").trim().toLowerCase(), perfil = String(f.get("perfil") || "").toUpperCase(), area = String(f.get("area_gerencia") || "").toUpperCase(), senha = String(f.get("senha") || "");
-    if (nome.length < 2 || login.length < 3 || !PERFIS_ACESSO.includes(perfil) || perfil === "GERENCIA" && !["DIGITAL", "CONVENCIONAL"].includes(area) || senha && senha.length < 6) return textResponse("Dados inválidos.", 400);
+    if (nome.length < 2 || login.length < 3 || !PERFIS_ACESSO.includes(perfil) || perfil === "GERENCIA" && area !== "DIGITAL" || senha && senha.length < 6) return textResponse("Dados inválidos.", 400);
     if (id === Number(usuario.id) && perfil !== "ADMINISTRADOR") return textResponse("Você não pode remover seu próprio perfil de Administrador.", 400);
     if (await env.db.prepare(`SELECT id FROM usuarios WHERE lower(usuario)=? AND id!=? LIMIT 1`).bind(login, id).first()) return textResponse("Usuário já existe.", 400);
-    const areaLegado = perfil === "GERENCIA" ? area : "AMBOS";
+    const areaLegado = "DIGITAL";
     if (senha) await env.db.prepare(`UPDATE usuarios SET nome=?,usuario=?,perfil=?,area_producao=?,senha_hash=? WHERE id=?`).bind(nome, login, perfil, areaLegado, await criarHashSenha(senha), id).run();
     else await env.db.prepare(`UPDATE usuarios SET nome=?,usuario=?,perfil=?,area_producao=? WHERE id=?`).bind(nome, login, perfil, areaLegado, id).run();
     if (perfil === "GERENCIA") await sincronizarAreaGerenciaV31(env, id, area, usuario.id);
@@ -26504,8 +26293,8 @@ async function rotearV31Base(request, env, url, caminho) {
     const f = periodo(url);
     let area = String(url.searchParams.get("area") || "DIGITAL").toUpperCase();
     if (isGerencia(usuario)) area = areaGerenciaV31(usuario) || "";
-    if (area === "GERAL" && isCoord(usuario)) return htmlResponse(paginaResumoGeralV31(usuario, await dadosResumoGeralV31(env, f.inicio, f.fim)));
-    if (!["DIGITAL", "CONVENCIONAL"].includes(area) || !podeGerenciarAreaV31(usuario, area)) return textResponse("Área não disponível.", 403);
+    if (area === "GERAL" && isCoord(usuario)) area = "DIGITAL";
+    if (area !== "DIGITAL" || !podeGerenciarAreaV31(usuario, area)) return textResponse("Área não disponível.", 403);
     return htmlResponse(paginaRelatorioAreaV31(usuario, await dadosRelatorioAreaV31(env, area, f.inicio, f.fim), url.searchParams.get("ok") || url.searchParams.get("erro") || "", url.searchParams.get("erro") ? "erro" : "sucesso"));
   }
   if (caminho === "/relatorios/exportar.csv" && metodo === "GET") {
@@ -26515,7 +26304,7 @@ async function rotearV31Base(request, env, url, caminho) {
     const f = periodo(url);
     let area = String(url.searchParams.get("area") || "DIGITAL").toUpperCase();
     if (isGerencia(usuario)) area = areaGerenciaV31(usuario) || "";
-    if (!["DIGITAL", "CONVENCIONAL"].includes(area) || !podeGerenciarAreaV31(usuario, area)) return textResponse("Escolha Digital ou Convencional para exportar.", 400);
+    if (area !== "DIGITAL" || !podeGerenciarAreaV31(usuario, area)) return textResponse("Somente a área Digital está disponível.", 400);
     const d = await dadosRelatorioAreaV31(env, area, f.inicio, f.fim);
     return respostaCsvV27(`fluxo-lab-${area.toLowerCase()}-${f.inicio}-a-${f.fim}.csv`, csvRelatorioAreaV31(usuario, d));
   }
@@ -26526,7 +26315,7 @@ async function rotearV31Base(request, env, url, caminho) {
     const f = periodo(url);
     let area = String(url.searchParams.get("area") || "DIGITAL").toUpperCase();
     if (isGerencia(usuario)) area = areaGerenciaV31(usuario) || "";
-    if (!["DIGITAL", "CONVENCIONAL"].includes(area) || !podeGerenciarAreaV31(usuario, area)) return textResponse("Área inválida.", 400);
+    if (area !== "DIGITAL" || !podeGerenciarAreaV31(usuario, area)) return textResponse("Área inválida.", 400);
     return htmlResponse(paginaImpressaoRelatorioAreaV31(usuario, await dadosRelatorioAreaV31(env, area, f.inicio, f.fim)));
   }
   if (caminho === "/fechamentos" && metodo === "GET") {
@@ -26534,7 +26323,7 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!usuario) return redirect("/");
     if (!podeVerGestao(usuario)) return textResponse("Acesso negado.", 403);
     const area = isGerencia(usuario) ? areaGerenciaV31(usuario) || "" : "";
-    return htmlResponse(paginaFechamentosV31(usuario, await listarFechamentosAreaV31(env, area), isCoord(usuario) ? await listarFechamentosLegadoV31(env) : [], url.searchParams.get("ok") || url.searchParams.get("erro") || "", url.searchParams.get("erro") ? "erro" : "sucesso"));
+    return htmlResponse(paginaFechamentosV31(usuario, await listarFechamentosAreaV31(env, area === "DIGITAL" ? "DIGITAL" : ""), [], url.searchParams.get("ok") || url.searchParams.get("erro") || "", url.searchParams.get("erro") ? "erro" : "sucesso"));
   }
   if (caminho === "/fechamentos/fechar" && metodo === "POST") {
     const usuario = await obterUsuarioLogado(request, env);
@@ -26555,6 +26344,7 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!podeVerGestao(usuario)) return textResponse("Acesso negado.", 403);
     const d = await obterFechamentoAreaV31(env, Number(match[1]));
     if (!d) return textResponse("Fechamento não encontrado.", 404);
+    if (d.fechamento.area !== "DIGITAL") return textResponse("Fechamento não disponível.", 404);
     if (isGerencia(usuario) && areaGerenciaV31(usuario) !== d.fechamento.area) return textResponse("Acesso negado.", 403);
     return htmlResponse(paginaFechamentoDetalheV31(usuario, d, url.searchParams.get("ok") || url.searchParams.get("erro") || "", url.searchParams.get("erro") ? "erro" : "sucesso"));
   }
@@ -26567,6 +26357,7 @@ async function rotearV31Base(request, env, url, caminho) {
     if (motivo.length < 5) return redirect(`/fechamentos/${id}?erro=${encodeURIComponent("Informe o motivo da reabertura.")}`);
     const reg = await env.db.prepare(`SELECT * FROM fechamentos_mensais_area WHERE id=? LIMIT 1`).bind(id).first();
     if (!reg) return textResponse("Fechamento não encontrado.", 404);
+    if (reg.area !== "DIGITAL") return textResponse("Fechamento não disponível.", 404);
     if (reg.status !== "FECHADO") return redirect(`/fechamentos/${id}?erro=${encodeURIComponent("Este fechamento já está reaberto.")}`);
     await env.db.prepare(`UPDATE fechamentos_mensais_area SET status='REABERTO',reaberto_por=?,reaberto_em=CURRENT_TIMESTAMP,motivo_reabertura=? WHERE id=?`).bind(usuario.id, motivo, id).run();
     await registrarAuditoriaSistemaV31(env, usuario.id, reg.area, "REABRIR_FECHAMENTO", "FECHAMENTO", id, "status", "FECHADO", "REABERTO", motivo);
@@ -26579,6 +26370,7 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!podeVerGestao(usuario)) return textResponse("Acesso negado.", 403);
     const d = await obterFechamentoAreaV31(env, Number(match[1]));
     if (!d) return textResponse("Fechamento não encontrado.", 404);
+    if (d.fechamento.area !== "DIGITAL") return textResponse("Fechamento não disponível.", 404);
     if (isGerencia(usuario) && areaGerenciaV31(usuario) !== d.fechamento.area) return textResponse("Acesso negado.", 403);
     return respostaCsvV27(`fluxo-lab-fechamento-${d.fechamento.area.toLowerCase()}-${d.fechamento.ano}-${String(d.fechamento.mes).padStart(2, "0")}.csv`, csvFechamentoAreaV31(usuario, d));
   }
@@ -26589,6 +26381,7 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!podeVerGestao(usuario)) return textResponse("Acesso negado.", 403);
     const d = await obterFechamentoAreaV31(env, Number(match[1]));
     if (!d) return textResponse("Fechamento não encontrado.", 404);
+    if (d.fechamento.area !== "DIGITAL") return textResponse("Fechamento não disponível.", 404);
     if (isGerencia(usuario) && areaGerenciaV31(usuario) !== d.fechamento.area) return textResponse("Acesso negado.", 403);
     return htmlResponse(paginaImpressaoFechamentoAreaV31(usuario, d));
   }
@@ -26598,7 +26391,7 @@ async function rotearV31Base(request, env, url, caminho) {
     if (!usuario) return redirect("/");
     if (!isCoord(usuario)) return textResponse("Acesso negado.", 403);
     const d = await obterFechamentoV27(env, Number(match[1]));
-    if (!d) return textResponse("Fechamento legado não encontrado.", 404);
+    if (!d || String(d.area || "").toUpperCase() === "CONVENCIONAL") return textResponse("Fechamento legado não encontrado.", 404);
     return htmlResponse(paginaFechamentoDetalheV27(usuario, d, "Histórico legado V3.0", "sucesso"));
   }
   return null;
@@ -27132,7 +26925,7 @@ const legacy = {
         if (!usuario) return redirect("/");
         if (!podeVerGestao(usuario)) return textResponse("Acesso negado.", 403);
         const filtro = periodoDashboardV26(url);
-        const area = areaDashboardV26(url.searchParams.get("area"));
+        const area = "DIGITAL";
         const dados = await dadosDashboardV26(env, filtro.inicio, filtro.fim, area);
         return htmlResponse(paginaDashboardV26(usuario, dados, filtro.inicio, filtro.fim, area));
       }
@@ -27823,10 +27616,8 @@ const legacy = {
         const area = String(dados.get("area_producao") || "DIGITAL").toUpperCase();
         const setor = String(dados.get("setor") || "").toUpperCase();
         const setorConvencional = String(dados.get("setor_convencional") || "").toUpperCase();
-        const areaValida = AREAS_PRODUCAO.includes(area);
-        const precisaDigital = ["DIGITAL", "AMBOS"].includes(area);
-        const precisaConvencional = ["CONVENCIONAL", "AMBOS"].includes(area);
-        if (nome.length < 2 || login.length < 3 || senha.length < 6 || !areaValida || precisaDigital && !SETORES.includes(setor) || precisaConvencional && !SETORES_CONVENCIONAIS.includes(setorConvencional)) {
+        const precisaDigital = area === "DIGITAL";
+        if (nome.length < 2 || login.length < 3 || senha.length < 6 || !precisaDigital || !SETORES.includes(setor)) {
           return redirect("/funcionarios?erro=" + encodeURIComponent("Confira área e setores do funcionário."));
         }
         const duplicado = await env.db.prepare(`SELECT id FROM usuarios WHERE lower(usuario) = ? LIMIT 1`).bind(login).first();
@@ -27839,9 +27630,9 @@ const legacy = {
           nome,
           login,
           await criarHashSenha(senha),
-          precisaDigital ? setor : null,
-          area,
-          precisaConvencional ? setorConvencional : null
+          setor,
+          "DIGITAL",
+          null
         ).run();
         return redirect("/funcionarios?ok=" + encodeURIComponent("Funcionário cadastrado."));
       }
@@ -27893,13 +27684,12 @@ const legacy = {
         const area = String(dados.get("area_producao") || "DIGITAL").toUpperCase();
         const setor = String(dados.get("setor") || "").toUpperCase();
         const setorConvencional = String(dados.get("setor_convencional") || "").toUpperCase();
-        const precisaDigital = ["DIGITAL", "AMBOS"].includes(area);
-        const precisaConvencional = ["CONVENCIONAL", "AMBOS"].includes(area);
-        if (nome.length < 2 || login.length < 3 || !AREAS_PRODUCAO.includes(area) || precisaDigital && !SETORES.includes(setor) || precisaConvencional && !SETORES_CONVENCIONAIS.includes(setorConvencional) || senha && senha.length < 6) return textResponse("Dados inválidos.", 400);
+        const precisaDigital = area === "DIGITAL";
+        if (nome.length < 2 || login.length < 3 || !precisaDigital || !SETORES.includes(setor) || senha && senha.length < 6) return textResponse("Dados inválidos.", 400);
         const duplicado = await env.db.prepare(`SELECT id FROM usuarios WHERE lower(usuario) = ? AND id != ? LIMIT 1`).bind(login, id).first();
         if (duplicado) return textResponse("Usuário já existe.", 400);
-        const setorDigitalFinal = precisaDigital ? setor : null;
-        const setorConvFinal = precisaConvencional ? setorConvencional : null;
+        const setorDigitalFinal = setor;
+        const setorConvFinal = null;
         if (senha) {
           await env.db.prepare(`UPDATE usuarios SET nome = ?, usuario = ?, setor = ?, area_producao = ?, setor_convencional = ?, senha_hash = ? WHERE id = ?`).bind(nome, login, setorDigitalFinal, area, setorConvFinal, await criarHashSenha(senha), id).run();
         } else {
@@ -28318,7 +28108,7 @@ const legacy = {
         const vigenciaInicio = String(dados.get("vigencia_inicio") || "");
         const vigenciaFimBruta = String(dados.get("vigencia_fim") || "").trim();
         const vigenciaFim = vigenciaFimBruta || null;
-        if (!["DIGITAL", "CONVENCIONAL"].includes(area) || !setorValidoAreaBonificacaoV25(area, setor)) {
+        if (area !== "DIGITAL" || !setorValidoAreaBonificacaoV25(area, setor)) {
           return redirect(urlPainelProducaoEquipeV25("DIGITAL", SETORES[0], inicio || periodo(url).inicio, fim || periodo(url).fim) + "&erro=" + encodeURIComponent("Área ou setor inválido."));
         }
         if (!Number.isInteger(metaDiaria) || metaDiaria < 0 || !Number.isFinite(valorCentavos)) {
@@ -28348,85 +28138,25 @@ const legacy = {
         return redirect(urlPainelProducaoEquipeV25(area, setor, inicio, fim) + "&ok=" + encodeURIComponent("Meta e bonificação salvas."));
       }
       if (caminho === "/producao-equipe/dias" && request.method === "POST") {
-        const usuario = await obterUsuarioLogado(request, env);
-        if (!usuario) return redirect("/");
-        if (!isCoord(usuario)) return textResponse("Somente Administrador ou Coordenador pode ajustar dias trabalhados.", 403);
-        const dados = await request.formData();
-        const funcionarioId = Number(dados.get("funcionario_id") || 0);
-        const area = String(dados.get("area") || "DIGITAL").toUpperCase();
-        const setor = String(dados.get("setor") || "");
-        const inicio = String(dados.get("inicio") || "");
-        const fim = String(dados.get("fim") || "");
-        const automatico = String(dados.get("automatico") || "") === "1";
-        if (!funcionarioId || !["DIGITAL", "CONVENCIONAL"].includes(area) || !setorValidoAreaBonificacaoV25(area, setor) || !dataIsoValidaV25(inicio) || !dataIsoValidaV25(fim) || fim < inicio) {
-          return textResponse("Dados inválidos para ajuste de dias.", 400);
-        }
-        const periodoMeta = periodoMetaMensalV312(inicio, fim);
-        if (automatico) {
-          await env.db.prepare(`
-            DELETE FROM ajustes_dias_bonificacao
-            WHERE funcionario_id = ? AND area = ? AND setor = ? AND periodo_inicio = ? AND periodo_fim = ?
-          `).bind(funcionarioId, area, setor, periodoMeta.inicio, periodoMeta.fim).run();
-          await registrarAuditoriaSistemaV31(env, usuario.id, area, "RESTAURAR_JORNADA_AUTOMATICA", "USUARIO", funcionarioId, `${setor}:${periodoMeta.inicio}:${periodoMeta.fim}`, "AJUSTE_MANUAL", "AUTOMATICO", null);
-          return redirect(urlPainelProducaoEquipeV25(area, setor, inicio, fim) + "&ok=" + encodeURIComponent("Contagem automática de dias restaurada."));
-        }
-        const diasConsiderados = Number(dados.get("dias_considerados"));
-        const meiosPeriodos = Number(dados.get("meios_periodos_considerados") || 0);
-        const motivo = String(dados.get("motivo") || "").trim();
-        const maxDias = Number(periodoMeta.limite_dias || 0);
-        if (!Number.isInteger(diasConsiderados) || diasConsiderados < 0 || diasConsiderados > maxDias || !Number.isInteger(meiosPeriodos) || meiosPeriodos < 0 || meiosPeriodos > maxDias || diasConsiderados + meiosPeriodos > maxDias || motivo.length < 3) {
-          return redirect(urlPainelProducaoEquipeV25(area, setor, inicio, fim) + "&erro=" + encodeURIComponent(`Jornada inválida. Para este mês/período, use no máximo ${maxDias} registros de dia inteiro ou meio período somados.`));
-        }
-        const diasDetectados = await diasDetectadosFuncionarioV25(env, area, setor, funcionarioId, periodoMeta.inicio, periodoMeta.fim);
-        const anterior = await env.db.prepare(`SELECT * FROM ajustes_dias_bonificacao WHERE funcionario_id=? AND area=? AND setor=? AND periodo_inicio=? AND periodo_fim=? LIMIT 1`).bind(funcionarioId, area, setor, periodoMeta.inicio, periodoMeta.fim).first();
-        await env.db.prepare(`
-          INSERT INTO ajustes_dias_bonificacao
-            (funcionario_id, area, setor, periodo_inicio, periodo_fim, dias_detectados, dias_considerados, meios_periodos_considerados, motivo, ajustado_por)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          ON CONFLICT(funcionario_id, area, setor, periodo_inicio, periodo_fim)
-          DO UPDATE SET
-            dias_detectados = excluded.dias_detectados,
-            dias_considerados = excluded.dias_considerados,
-            meios_periodos_considerados = excluded.meios_periodos_considerados,
-            motivo = excluded.motivo,
-            ajustado_por = excluded.ajustado_por,
-            criado_em = CURRENT_TIMESTAMP
-        `).bind(funcionarioId, area, setor, periodoMeta.inicio, periodoMeta.fim, diasDetectados, diasConsiderados, meiosPeriodos, motivo, usuario.id).run();
-        await registrarAuditoriaSistemaV31(env, usuario.id, area, "AJUSTAR_JORNADA_META", "USUARIO", funcionarioId, `${setor}:${periodoMeta.inicio}:${periodoMeta.fim}`, anterior ? `${anterior.dias_considerados || 0}d + ${anterior.meios_periodos_considerados || 0} meio(s)` : null, `${diasConsiderados}d + ${meiosPeriodos} meio(s)`, motivo);
-        return redirect(urlPainelProducaoEquipeV25(area, setor, inicio, fim) + "&ok=" + encodeURIComponent(periodoMeta.mensal ? "Jornada mensal da meta ajustada." : "Jornada para a meta ajustada."));
+        return textResponse("Ajustes manuais de dias foram desativados. A meta usa os dias úteis do período selecionado.", 410);
       }
       if (caminho === "/producao-equipe" && request.method === "GET") {
         const usuario = await obterUsuarioLogado(request, env);
         if (!usuario) return redirect("/");
         if (!podeVerGestao(usuario)) return textResponse("Acesso negado.", 403);
         const filtro = periodo(url);
-        let area = String(url.searchParams.get("area") || "DIGITAL").toUpperCase();
-        if (isGerencia(usuario)) area = areaGerenciaV31(usuario) || "";
-        if (!["DIGITAL", "CONVENCIONAL"].includes(area) || !podeGerenciarAreaV31(usuario, area)) {
-          return textResponse("Área não disponível.", 403);
-        }
-        const setores = setoresAreaBonificacaoV25(area);
-        let setor = String(url.searchParams.get("setor") || "");
-        if (!setores.includes(setor)) setor = setores[0];
+        if (diasCalendarioInclusivosV25(filtro.inicio, filtro.fim) > 366) return textResponse("O período máximo da central é de 366 dias.", 400);
+        const area = isGerencia(usuario) ? areaGerenciaV31(usuario) : "DIGITAL";
+        if (area !== "DIGITAL" || !podeGerenciarAreaV31(usuario, "DIGITAL")) return textResponse("Área não disponível.", 403);
+        let setor = String(url.searchParams.get("setor") || "TODOS");
+        if (setor !== "TODOS" && !SETORES.includes(setor)) setor = "TODOS";
+        const geral = setor === "TODOS";
         const [painel, metasLideranca] = await Promise.all([
-          obterPainelProducaoEquipeV25(env, area, setor, filtro.inicio, filtro.fim),
-          regrasMetasPessoaisV318(env, area, setor, filtro.inicio, filtro.fim)
+          geral ? obterPainelGeralProducaoDigitalV60(env, filtro.inicio, filtro.fim) : obterPainelProducaoEquipeV25(env, "DIGITAL", setor, filtro.inicio, filtro.fim),
+          geral ? [] : regrasMetasPessoaisV318(env, "DIGITAL", setor, filtro.inicio, filtro.fim)
         ]);
         const mensagem = url.searchParams.get("ok") || url.searchParams.get("erro") || "";
-        const tipoMensagem = url.searchParams.get("erro") ? "erro" : "sucesso";
-        return htmlResponse(
-          paginaProducaoEquipeV25(
-            usuario,
-            painel,
-            area,
-            setor,
-            filtro.inicio,
-            filtro.fim,
-            mensagem,
-            tipoMensagem,
-            metasLideranca
-          )
-        );
+        return htmlResponse(paginaProducaoEquipeV25(usuario, painel, "DIGITAL", setor, filtro.inicio, filtro.fim, mensagem, url.searchParams.get("erro") ? "erro" : "sucesso", metasLideranca));
       }
       if (caminho === "/producao" && request.method === "GET") {
         const usuario = await obterUsuarioLogado(
